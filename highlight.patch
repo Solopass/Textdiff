@@ -1,0 +1,23 @@
+--- src/App.tsx
++++ src/App.tsx
+@@ -17,8 +17,17 @@
+ 
+ const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+ 
+-function highlightCode(text: string, theme: 'dark' | 'light' | 'high-contrast') {
++function highlightCode(text: string, theme: 'dark' | 'light' | 'high-contrast', language: string = 'javascript') {
+   if (!text) return '';
+-  const regex = /(\/\/.*|\/\*[\s\S]*?\*\/)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(const|let|var|function|return|if|else|for|while|class|import|export|from|switch|case|break|continue|default|async|await|new|this|true|false|null|undefined)\b|\b(\d+(?:\.\d+)?)\b/g;
++  
++  let regex;
++  if (language === 'plain') {
++    return escapeHtml(text);
++  } else if (language === 'python') {
++    regex = /(#.*)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(def|class|if|elif|else|for|while|return|yield|import|from|try|except|finally|with|as|pass|break|continue|True|False|None|and|or|not|in|is|lambda)\b|\b(\d+(?:\.\d+)?)\b/g;
++  } else if (language === 'json') {
++    regex = /()|("(?:\\.|[^"\\])*")|()|\b(\d+(?:\.\d+)?|true|false|null)\b/g;
++  } else { // javascript/typescript
++    regex = /(\/\/.*|\/\*[\s\S]*?\*\/)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(const|let|var|function|return|if|else|for|while|class|import|export|from|switch|case|break|continue|default|async|await|new|this|true|false|null|undefined|interface|type)\b|\b(\d+(?:\.\d+)?)\b/g;
++  }
+   
+   let lastIndex = 0;

@@ -1,0 +1,60 @@
+--- src/App.tsx
++++ src/App.tsx
+@@ -2,3 +2,2 @@
+ import { Zap, CheckSquare, Square, FileText, SplitSquareHorizontal, Rows, ArrowLeftRight, UploadCloud, Download, ListOrdered, Search, ChevronUp, ChevronDown, X, Keyboard, HelpCircle, Trash2, Maximize, Minimize, FileCode, Copy } from 'lucide-react';
+-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+ import jsPDF from 'jspdf';
+@@ -484,2 +483,4 @@
+   const [language, setLanguage] = useState('javascript');
++  const [splitRatio, setSplitRatio] = useState(50);
++  const isDraggingSplitter = useRef(false);
+   const [showHelpModal, setShowHelpModal] = useState(false);
+@@ -528,2 +529,19 @@
+ 
++  const handleSplitterMove = (e: MouseEvent) => {
++    if (!isDraggingSplitter.current) return;
++    const container = document.getElementById('split-container');
++    if (!container) return;
++    const rect = container.getBoundingClientRect();
++    let newRatio = ((e.clientX - rect.left) / rect.width) * 100;
++    newRatio = Math.max(20, Math.min(80, newRatio));
++    setSplitRatio(newRatio);
++  };
++
++  useEffect(() => {
++    const onMouseUp = () => isDraggingSplitter.current = false;
++    window.addEventListener('mousemove', handleSplitterMove);
++    window.addEventListener('mouseup', onMouseUp);
++    return () => { window.removeEventListener('mousemove', handleSplitterMove); window.removeEventListener('mouseup', onMouseUp); };
++  }, []);
++
+   const handleExportHtml = async (text: string) => {
+@@ -974,5 +992,4 @@
+         {/* Input Textareas Section (Desktop Resizable Panels) */}
+-        <section className="hidden lg:block h-[400px] mb-6">
+-          <PanelGroup direction="horizontal">
+-            <Panel defaultSize={50} minSize={20} className="flex flex-col pr-3">
++        <section id="split-container" className="hidden lg:flex h-[400px] mb-6 relative">
++            <div style={{ width: `calc(${splitRatio}% - 8px)` }} className="flex flex-col">
+               <div 
+@@ -1020,7 +1037,7 @@
+                 />
+               </div>
+-            </Panel>
+-            <PanelResizeHandle className="w-4 flex items-center justify-center cursor-col-resize group">
+-              <div className="w-1 h-12 bg-[#334155] rounded-full group-hover:bg-[#34D399] transition-colors" />
+-            </PanelResizeHandle>
+-            <Panel defaultSize={50} minSize={20} className="flex flex-col pl-3">
++            </div>
++            <div onMouseDown={(e) => { e.preventDefault(); isDraggingSplitter.current = true; }} className="w-4 flex items-center justify-center cursor-col-resize group z-10 hover:bg-[#334155]/20 h-full">
++              <div className="w-1 h-12 bg-[#334155] rounded-full group-hover:bg-[#34D399] transition-colors" />
++            </div>
++            <div style={{ width: `calc(${100 - splitRatio}% - 8px)` }} className="flex flex-col">
+               <div 
+@@ -1066,4 +1083,3 @@
+                 />
+               </div>
+-            </Panel>
+-          </PanelGroup>
++            </div>
+         </section>

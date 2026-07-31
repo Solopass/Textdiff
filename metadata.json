@@ -1,0 +1,6 @@
+{
+  "name": "TextDiff Studio",
+  "description": "Fast, browser-based side-by-side & unified text comparison tool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
