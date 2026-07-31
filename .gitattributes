@@ -1,0 +1,10 @@
+# Normalize line endings so files don't show as modified just from CRLF/LF
+# churn between Windows checkouts and the Linux CI runner.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
