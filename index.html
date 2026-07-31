@@ -3,11 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  <link rel="manifest" href="/manifest.json"><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js")}</script></head>
+    <title>TextDiff Studio</title>
+    <!-- Relative paths: this is served from a GitHub Pages project subpath
+         (/Textdiff/), so a leading slash would resolve to the wrong origin root. -->
+    <link rel="manifest" href="./manifest.json" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('./sw.js');
+
+          // When a new worker takes control (skipWaiting + clients.claim),
+          // reload once so the page isn't left running assets from the
+          // previous deploy. The guard prevents a reload loop.
+          var reloaded = false;
+          navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (reloaded) return;
+            reloaded = true;
+            window.location.reload();
+          });
+        });
+      }
+    </script>
+  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
