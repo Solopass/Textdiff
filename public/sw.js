@@ -1,9 +1,9 @@
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open('textdiff-store').then((cache) => cache.addAll([
-      '/',
-      '/index.html',
-      '/manifest.json'
+      './',
+      './index.html',
+      './manifest.json'
     ])),
   );
 });
