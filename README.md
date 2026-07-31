@@ -10,6 +10,7 @@
 **TextDiff Studio** is a fast browser application that allows developers, writers, and students to perform rapid line-by-line text and code comparisons. It features an automated diff engine using the Longest Common Subsequence (LCS) algorithm to compute additions, deletions, and structural similarity metrics.
 
 This is the **React, Tailwind CSS, & Vite** modernized version of TextDiff Studio.
+Pages link: ' https://solopass.github.io/Textdiff/ '
 
 ## Features
 
