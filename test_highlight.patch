@@ -1,0 +1,105 @@
+--- src/App.tsx
++++ src/App.tsx
+@@ -25,40 +25,32 @@
+ function highlightCode(text: string, theme: 'dark' | 'light' | 'high-contrast', language: string = 'javascript') {
+   if (!text) return '';
+   
+-  let regex;
+-  if (language === 'plain') {
+-    return escapeHtml(text);
+-  } else if (language === 'python') {
+-    regex = /(#.*)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(def|class|if|elif|else|for|while|return|yield|import|from|try|except|finally|with|as|pass|break|continue|True|False|None|and|or|not|in|is|lambda)\b|\b(\d+(?:\.\d+)?)\b/g;
+-  } else if (language === 'json') {
+-    regex = /()|("(?:\\.|[^"\\])*")|()|\b(\d+(?:\.\d+)?|true|false|null)\b/g;
+-  } else { // javascript/typescript
+-    regex = /(\/\/.*|\/\*[\s\S]*?\*\/)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(const|let|var|function|return|if|else|for|while|class|import|export|from|switch|case|break|continue|default|async|await|new|this|true|false|null|undefined|interface|type)\b|\b(\d+(?:\.\d+)?)\b/g;
+-  }
+-  
+-  let lastIndex = 0;
+-  let html = '';
+-  let match;
++  if (language === 'plain') return escapeHtml(text);
++  let lang = language;
++  if (!Prism.languages[lang]) lang = 'javascript';
+   
+   const getThemeClasses = (type: string) => {
++    const t = type.split(' ')[0]; // Prism sometimes returns multiple classes like "keyword control-flow"
+     if (theme === 'high-contrast') {
+-      if (type === 'comment') return 'text-[#A1A1AA] italic';
+-      if (type === 'string') return 'text-[#FDE047]';
+-      if (type === 'keyword') return 'text-[#F9A8D4] font-bold';
+-      if (type === 'number') return 'text-[#D8B4FE] font-bold';
++      if (t === 'comment') return 'text-[#A1A1AA] italic';
++      if (t === 'string' || t === 'char' || t === 'attr-value') return 'text-[#FDE047]';
++      if (t === 'keyword' || t === 'builtin' || t === 'tag') return 'text-[#F9A8D4] font-bold';
++      if (t === 'number' || t === 'boolean' || t === 'constant') return 'text-[#D8B4FE] font-bold';
++      if (t === 'function' || t === 'class-name') return 'text-[#93C5FD]';
++      if (t === 'operator' || t === 'punctuation') return 'text-[#94A3B8]';
+       return 'text-white';
+     } else if (theme === 'light') {
+-      if (type === 'comment') return 'text-[#94A3B8] italic';
+-      if (type === 'string') return 'text-[#059669]';
+-      if (type === 'keyword') return 'text-[#DB2777] font-semibold';
+-      if (type === 'number') return 'text-[#7C3AED]';
++      if (t === 'comment') return 'text-[#94A3B8] italic';
++      if (t === 'string' || t === 'char' || t === 'attr-value') return 'text-[#059669]';
++      if (t === 'keyword' || t === 'builtin' || t === 'tag') return 'text-[#DB2777] font-semibold';
++      if (t === 'number' || t === 'boolean' || t === 'constant') return 'text-[#7C3AED]';
++      if (t === 'function' || t === 'class-name') return 'text-[#2563EB]';
++      if (t === 'operator' || t === 'punctuation') return 'text-[#64748B]';
+       return 'text-[#0F172A]';
+     } else { // dark
+-      if (type === 'comment') return 'text-[#64748B] italic';
+-      if (type === 'string') return 'text-[#A7F3D0]';
+-      if (type === 'keyword') return 'text-[#F472B6] font-semibold';
+-      if (type === 'number') return 'text-[#C084FC]';
++      if (t === 'comment') return 'text-[#64748B] italic';
++      if (t === 'string' || t === 'char' || t === 'attr-value') return 'text-[#A7F3D0]';
++      if (t === 'keyword' || t === 'builtin' || t === 'tag') return 'text-[#F472B6] font-semibold';
++      if (t === 'number' || t === 'boolean' || t === 'constant') return 'text-[#C084FC]';
++      if (t === 'function' || t === 'class-name') return 'text-[#60A5FA]';
++      if (t === 'operator' || t === 'punctuation') return 'text-[#475569]';
+       return 'text-[#E2E8F0]';
+     }
+   };
+-
+-  while ((match = regex.exec(text)) !== null) {
+-    html += escapeHtml(text.slice(lastIndex, match.index));
+-    
+-    if (match[1]) {
+-      html += `<span class="${getThemeClasses('comment')}">${escapeHtml(match[0])}</span>`;
+-    } else if (match[2]) {
+-      html += `<span class="${getThemeClasses('string')}">${escapeHtml(match[0])}</span>`;
+-    } else if (match[4]) {
+-      html += `<span class="${getThemeClasses('keyword')}">${escapeHtml(match[0])}</span>`;
+-    } else if (match[5]) {
+-      html += `<span class="${getThemeClasses('number')}">${escapeHtml(match[0])}</span>`;
+-    } else {
+-      html += escapeHtml(match[0]);
+-    }
+-    
+-    lastIndex = regex.lastIndex;
+-  }
+-  html += escapeHtml(text.slice(lastIndex));
+-  return html;
++  
++  let html = '';
++  try {
++    const tokens = Prism.tokenize(text, Prism.languages[lang]);
++    
++    const processToken = (token: any) => {
++      if (typeof token === 'string') {
++        return escapeHtml(token);
++      }
++      if (Array.isArray(token.content)) {
++        return `<span class="${getThemeClasses(token.type)}">${token.content.map(processToken).join('')}</span>`;
++      }
++      return `<span class="${getThemeClasses(token.type)}">${escapeHtml(token.content)}</span>`;
++    };
++    
++    html = tokens.map(processToken).join('');
++  } catch(e) {
++    html = escapeHtml(text);
++  }
++  return html;
+ }

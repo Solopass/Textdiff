@@ -1,0 +1,9 @@
+{
+  "short_name": "TextDiff",
+  "name": "TextDiff Studio",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0A0A0C",
+  "background_color": "#0A0A0C"
+}
