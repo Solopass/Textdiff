@@ -20,9 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 22: jsdom, @testing-library/jest-dom and undici all declare
+      # engines >=22, and package-lock.json is generated with npm 10.9.x.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
