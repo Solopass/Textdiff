@@ -10,8 +10,10 @@ green, initial load ~132KB gzipped.
 
 ## 0. Ship what's already built
 
-Nothing below matters until this is out. There are ~57 changed or new files
-sitting uncommitted.
+Nothing below matters until this is out. The work is committed on the
+`overhaul/v1` branch and not yet pushed.
+
+All commands below are PowerShell, run from the repository root.
 
 ### 0.1 — Smoke test in a real browser
 
@@ -19,11 +21,17 @@ The test suite covers logic and interaction under jsdom. It cannot catch a
 broken Content Security Policy, and a bad CSP white-screens the app without
 failing a single test. This step exists for that.
 
-```bash
+```powershell
 npm ci
-npm run typecheck && npm test && npm run build:web
+npm run typecheck
+npm test
+npm run build:web
 npm run preview
 ```
+
+> In PowerShell, `&&` only chains commands in PowerShell 7+. On Windows
+> PowerShell 5.1 it is a parse error, so the commands are listed separately.
+> Check with `$PSVersionTable.PSVersion`.
 
 Open the preview URL and, with devtools console visible, check:
 
@@ -50,7 +58,7 @@ message before changing anything.
 new client sends. Deploy the rules with or after the app, never before, or
 sharing breaks for everyone on the old build.
 
-```bash
+```powershell
 firebase deploy --only firestore:rules
 ```
 
@@ -60,13 +68,16 @@ sync — check that the deployed app is the new one.
 
 ### 0.3 — Push
 
-```bash
-git add -A
-git commit -m "Fix diff engine correctness and memory, harden sharing, add folder diff and command palette"
-git push origin main
+The work is already committed on the `overhaul/v1` branch; `main` is untouched.
+
+```powershell
+git status                       # expect a clean tree on overhaul/v1
+git push -u origin overhaul/v1
 ```
 
-CI runs typecheck → tests → build, and blocks the deploy if any fail.
+Then open a pull request. CI runs typecheck → tests → build on PRs and skips
+the deploy steps, so you get a green check before anything reaches the live
+site. Merge to `main` when it passes.
 
 ### 0.4 — Note the similarity change in your release notes
 
@@ -79,10 +90,18 @@ One sentence is enough.
 
 Expiry is enforced in three places, but nothing *deletes* until this runs.
 
-```bash
-npm install firebase-admin        # server-only; deliberately not a project dep
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```powershell
+npm install firebase-admin       # server-only; deliberately not a project dep
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\to\service-account.json"
 node scripts/cleanup-expired-shares.mjs --dry-run
+```
+
+`$env:` sets the variable for the current session only. To persist it for your
+user account:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "GOOGLE_APPLICATION_CREDENTIALS", "C:\path\to\service-account.json", "User")
 ```
 
 Once the dry run looks right, drop `--dry-run` and schedule it daily (GitHub
@@ -111,7 +130,7 @@ it lazy. Measure before and after.
    auto-installed peer (0.56.0), while the CDN serves a *different* version
    (0.55.1). Pinning it removes that mismatch.
 
-   ```bash
+   ```powershell
    npm install monaco-editor@0.56.0
    ```
 
@@ -136,20 +155,25 @@ it lazy. Measure before and after.
 
 ### How you know it worked
 
-```bash
+```powershell
 npm run build:web
-grep -rc "jsdelivr" dist/assets/*.js   # expect 0 everywhere
+.\scripts\Check-Bundle.ps1 -CheckCdn
 ```
+
+`-CheckCdn` reports any built asset still referencing jsdelivr or cdnjs. You
+want none.
 
 Then load the preview with devtools **Network** open and filter for
 `jsdelivr` — there must be zero requests. Also check the initial payload didn't
 balloon:
 
-```bash
-grep -oE 'assets/[A-Za-z0-9._-]+\.(js|css)' dist/index.html | sort -u \
-  | sed 's|^|dist/|' | while read f; do gzip -c "$f" | wc -c; done \
-  | awk '{s+=$1} END {printf "%.1f KB gzipped\n", s/1024}'
+```powershell
+.\scripts\Check-Bundle.ps1
 ```
+
+It lists what loads on first paint with raw and gzipped sizes, totals them, and
+fails if any of firebase / jspdf / html2canvas / socket.io has stopped being
+lazy.
 
 If that number jumped a lot, Monaco ended up in the entry chunk — it needs to
 stay behind the lazy boundary. See the code-splitting section in
@@ -164,7 +188,9 @@ Monaco) and `SECURITY.md` when this lands.
 
 Cheap now that the interaction harness exists. Maybe an hour.
 
-1. `npm install -D vitest-axe`
+1. ```powershell
+   npm install -D vitest-axe
+   ```
 2. Add a test that renders the studio view and asserts no violations:
 
    ```ts
@@ -191,7 +217,12 @@ Five minutes. `src/components/CloudSyncModal.tsx` is imported by `App.tsx` and
 never rendered — it was dead before this round of work and still is. Either give
 it a trigger or delete the file and its import. Right now it's just misleading.
 
-Verify with `npm run typecheck && npm test`.
+Verify:
+
+```powershell
+npm run typecheck
+npm test
+```
 
 ---
 
@@ -210,7 +241,7 @@ dependencies are narrow:
    options into a single object rather than passing ~20 props.
 
 **Method that worked well:** extract by line range programmatically rather than
-retyping, run `npm run typecheck && npm test` after each single extraction, and
+retyping, run `npm run typecheck; npm test` after each single extraction, and
 commit between them. Don't batch — if 72 tests go red you want to know which
 move did it.
 
@@ -234,10 +265,10 @@ Learned the hard way during this work:
 - **Break your test and watch it fail** before trusting it. A line-number test
   here passed against a deliberately reintroduced bug because its input never
   reached the relevant branch.
-- **Check what `dist/index.html` references** after any dependency or config
-  change. A chunk being *named* separately doesn't mean it loads lazily — an
-  earlier config shipped 580KB of export libraries to every visitor while
-  looking correctly split in the build output.
+- **Run `.\scripts\Check-Bundle.ps1`** after any dependency or config change. A
+  chunk being *named* separately doesn't mean it loads lazily — an earlier
+  config shipped 580KB of export libraries to every visitor while looking
+  correctly split in the build output.
 - **The browser pass isn't optional** for changes to `index.html`,
   `vite.config.ts`, or anything touching Monaco. Tests can't see a CSP.
 - **Adding a persisted setting is three edits**: the `tds_config` payload, the

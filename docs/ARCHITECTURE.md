@@ -160,8 +160,16 @@ imported:
 **To verify a change didn't regress this**, don't trust the chunk list — check
 what the entry HTML actually references:
 
-```bash
+```powershell
 npm run build:web
+.\scripts\Check-Bundle.ps1
+```
+
+That script lists exactly what the entry HTML pulls in, with gzipped sizes, and
+fails if any of firebase / jspdf / html2canvas / socket.io has stopped being
+lazy. On a non-Windows shell:
+
+```bash
 grep -oE 'assets/[A-Za-z0-9._-]+\.(js|css)' dist/index.html | sort -u
 ```
 
