@@ -1,9 +1,33 @@
 {
   "short_name": "TextDiff",
   "name": "TextDiff Studio",
-  "icons": [],
+  "description": "Compare text and code instantly in your browser. Side-by-side and unified diffs, syntax highlighting, 3-way merge, and shareable links.",
+  "id": "./",
   "start_url": ".",
+  "scope": ".",
   "display": "standalone",
+  "orientation": "any",
   "theme_color": "#0A0A0C",
-  "background_color": "#0A0A0C"
+  "background_color": "#0A0A0C",
+  "categories": ["developer", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
 }

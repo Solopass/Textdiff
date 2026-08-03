@@ -1,8 +1,57 @@
 rules_version = '2';
+
+// Shared diffs are anonymous and unauthenticated by design — anyone with the
+// link can open one. The rules therefore cannot do identity checks; what they
+// CAN do is bound the damage:
+//
+//   * reads are per-document only. `get` is allowed, `list` is not, so a
+//     client cannot enumerate the collection and harvest every diff people
+//     have ever shared. Document IDs are Firestore auto-IDs (20 chars over a
+//     ~62-symbol alphabet), so they are not practically guessable.
+//   * creates are size-capped and shape-checked, so the collection cannot be
+//     used as free unbounded storage or to run up the bill.
+//   * creates must carry an expiry, bounded to at most ~31 days out, so a
+//     client cannot mint a link that outlives the retention policy.
+//   * updates are refused. A shared link is immutable; nobody should be able
+//     to overwrite the contents of a URL someone else has already circulated.
+//
+// If accounts are added later, tighten `get` to an owner check plus an
+// explicit `public` flag.
+
 service cloud.firestore {
   match /databases/{database}/documents {
     match /diffs/{diffId} {
-      allow read, create: if true;
+
+      // Single-document reads only — `list` stays denied.
+      //
+      // Expiry is NOT enforced here. Rules can't compare against wall-clock
+      // "now" for a `get` without forcing every read through a query, and a
+      // client that ignored the result would gain nothing anyway: the data is
+      // already in its hands. Expiry is enforced two places that matter — the
+      // app refuses to render an expired document, and the scheduled cleanup
+      // job deletes it. See SECURITY.md.
+      allow get: if true;
+      allow list: if false;
+
+      allow create: if
+        // Payload shape is fixed. Anything else is rejected.
+        request.resource.data.keys().hasOnly(['data', 'timestamp', 'expiresAt'])
+        && request.resource.data.data is string
+        // ~900KB ceiling, just under Firestore's 1MiB document limit. Large
+        // enough for any realistic diff, small enough to bound abuse.
+        && request.resource.data.data.size() < 900000
+        && request.resource.data.timestamp is number
+        && request.resource.data.expiresAt is number
+        // Must expire in the future, and no more than ~31 days out. The app
+        // uses 30 days; the extra day absorbs clock skew between the client
+        // and the server rather than rejecting honest requests.
+        && request.resource.data.expiresAt > request.resource.data.timestamp
+        && request.resource.data.expiresAt <=
+             request.resource.data.timestamp + 2678400000;
+
+      // Shares are write-once. Deletion is performed by the cleanup job using
+      // the Admin SDK, which bypasses these rules; no client may delete.
+      allow update, delete: if false;
     }
   }
 }

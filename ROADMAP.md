@@ -1,29 +1,107 @@
-# TextDiff Studio - Roadmap V2 & V3 🚀
+# TextDiff Studio — Roadmap
 
-## ✅ Completed (V2)
-- [x] **Git Merge Conflict Resolver Mode**: A dedicated mode to paste standard `<<<<<<< HEAD` merge conflict markers and automatically populate the 3-way merge tool.
-- [x] **Custom Syntax Themes API**: Allow users to share their custom syntax themes via URL or JSON import.
-- [x] **Advanced Analytics Dashboard**: Track how much time is saved resolving conflicts and view personal diffing statistics.
-- [x] **Annotated Sharing**: Allow users to leave comments or annotations on specific lines of a diff before sharing the permanent URL.
-- [x] **PWA & Offline Mode**: Full Progressive Web App support to install TextDiff Studio natively and use the web worker diff engine without an internet connection.
-- [x] **Live Customization Previews**: Non-blocking side panel to modify aesthetics in real-time.
-- [x] **Customization Randomizer with Locks**: Randomly generate aesthetic profiles while locking preferred traits.
+Status is tracked against what actually ships in `main`. A previous version of
+this file marked several items complete that were never built (GitLab support,
+the community theme gallery, the colour palette generator); those have been
+moved back to "planned" so this file can be trusted.
 
-## 🔜 Coming in V3 (Enterprise & Collaboration)
-- [x] **Full GitHub & GitLab Integration**: Connect repositories, pull requests, and commit histories to view and resolve diffs directly against live repos.
-- [x] **Live Collaboration (Multiplayer)**: Multiplayer mode where multiple users can view and edit the same diff session simultaneously using WebSockets.
-- [ ] **Semantic Code Diffing**: Understand code structure (AST-based) so moving a function to a different part of the file is recognized as a "move" rather than deletion/addition.
-- [ ] **Folder & Zip Diffing**: Upload zip files or directories to compare multiple files across two folder structures.
-- [x] **AI-Assisted Resolution**: Integrate with Gemini API to suggest automated resolutions for complex conflicts and explain changes in plain English.
-- [ ] **Self-Hosted Backend**: Provide Docker images for enterprises to host the sharing and sync backend internally.
-- [ ] **Inline Editing**: Allow editing text directly within the unified and split diff views, with real-time diff updating.
+## ✅ Shipped
 
-## 🎨 Customization & Aesthetics Engine Roadmap
-- [x] **Advanced Font Settings**: Granular control over font size, line height, and letter-spacing for maximum legibility.
-- [x] **Custom CSS Injector**: Allow power users to inject arbitrary CSS to tweak the UI precisely to their liking.
-- [x] **Background Textures & Patterns**: Toggleable dot grids, subtle noise overlays, or grid-paper patterns behind the application canvas.
-- [x] **UI Sound Design**: Satisfying, toggleable auditory feedback (soft clicks, smooth transitions) for interactions and diff synchronizations.
-- [x] **Motion & Transition Controls**: Toggles to enable fluid spring animations or "reduce motion" for strict accessibility.
-- [x] **Glassmorphism / Frosted Effects**: Toggles to add sophisticated blur effects to modals, headers, and UI panels.
-- [x] **Community Theme Gallery**: A built-in explorer to browse, preview, and install community-created aesthetic profiles.
-- [x] **Color Palette Generator**: Input a primary hex code (or upload an image) and automatically derive a cohesive aesthetic tint and syntax theme using AI or color math.
+### Core diffing
+
+- **Line diff engine (LCS)** — runs in a Web Worker. Common leading/trailing
+  lines are peeled off before the quadratic step, and the DP table is capped so
+  a pathological input reports an error instead of exhausting memory.
+- **Word/token-level highlighting** within changed line pairs.
+- **Split and unified views**, with automatic fallback to unified below 640px.
+- **3-way merge / Git conflict resolver** — paste `<<<<<<< HEAD` markers and the
+  three panes populate automatically.
+- **Comparison filters** — ignore whitespace, ignore case, trim blank lines.
+  These apply to both 2-way and 3-way modes.
+- **Fold unchanged lines** to context only.
+
+### Files and bulk comparison
+
+- **Drag & drop** — one file per pane, or drop two at once to fill both sides.
+  Binary files and files over 15MB are rejected with a message.
+- **Folder & ZIP diffing** — compare two directory trees or two archives; shows
+  added / removed / modified / identical counts with a path filter, and opens
+  any pair in the main diff view. Read entirely in-browser.
+- **GitHub repository browsing** — open files from a repo via the GitHub API.
+
+### Sharing and history
+
+- **Compressed URL fragments** — fully client-side, nothing leaves the browser.
+- **Permanent links** backed by Firestore, with an optional note attached to the
+  whole comparison.
+- **GitHub Gist sync** via a personal access token.
+- **Local history** — the last 20 comparisons, stored in the browser.
+
+### Export
+
+- HTML, PNG (html2canvas), PDF (jsPDF, paginated), and raw JSON.
+
+### Interface
+
+- **Command palette** (`Ctrl/Cmd+K`) with fuzzy search over every major action.
+- **Keyboard shortcuts** — run, swap, palette, escape-to-close.
+- **Installable PWA** with offline support.
+- **Customization** — syntax themes, UI tint, radius, font family, three font
+  sizes, background textures, motion toggle, glassmorphism, sound effects, and a
+  custom CSS injector.
+- **Preset save/load** and theme JSON import/export.
+- **Integration test suite** in the Settings pane.
+
+### Engineering
+
+- Code splitting: initial load ~130KB gzipped; Firebase, jsPDF, html2canvas,
+  socket.io and the ZIP reader are fetched on demand.
+- Unit tests for the diff engine, folder comparison, and palette matching.
+- CI gates the deploy on typecheck and tests.
+
+## 🚧 Requires a backend
+
+`server.ts` (Express + Socket.IO + a Gemini proxy) is **not** deployed by the
+GitHub Pages workflow, so these are disabled in the live build. They work when
+that backend is hosted and `VITE_ENABLE_SERVER_FEATURES=true` is set at build
+time.
+
+- **Live collaboration (multiplayer)** — shared editing over WebSockets.
+- **AI-assisted resolution** — Gemini suggests conflict resolutions.
+
+## 📋 Planned
+
+### High value
+
+- [ ] **Inline editing in the diff view** — edit directly in the unified/split
+      output with the diff recomputing live.
+- [ ] **Move detection** — recognise a relocated block as a move rather than a
+      delete plus an add.
+- [ ] **Adjustable fold context** — currently fixed; let the user choose how many
+      surrounding lines to keep.
+- [ ] **Per-line comments on shared diffs** — today a share carries one note for
+      the whole comparison, not per-line annotations.
+
+### Larger efforts
+
+- [ ] **Semantic (AST-based) diffing** — understand structure so a moved function
+      reads as a move. Language-specific and a significant undertaking.
+- [ ] **Self-hosted backend** — a Docker image for the sharing/sync/multiplayer
+      backend.
+- [ ] **GitLab and Bitbucket integration** — only GitHub is supported today.
+
+### Customization
+
+- [ ] **Community theme gallery** — browse and install themes made by others.
+      Themes can currently be shared as JSON, but there is no gallery.
+- [ ] **Colour palette generator** — derive a full theme from one hex value or an
+      uploaded image.
+- [ ] **Finer typography control** — line height and letter spacing. Only three
+      preset font sizes exist today.
+
+### Engineering
+
+- [ ] **Split up `App.tsx`** — still around 4,000 lines and most of the app.
+- [ ] **Component and interaction tests** — current coverage is the pure logic
+      plus two render smoke tests; the UI flows are untested.
+- [ ] **Automated accessibility checks** in CI.
