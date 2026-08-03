@@ -3,9 +3,81 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TextDiff Studio</title>
+
+    <!--
+      Content Security Policy. GitHub Pages serves static files only and can't
+      set response headers, so this goes in a meta tag instead.
+
+      Why each source is here:
+        script-src  jsdelivr — Monaco is loaded from the CDN by
+                    @monaco-editor/react, which injects its AMD loader as a
+                    <script> and then pulls further modules. Its web workers
+                    are blob shims that importScripts() back to the CDN, and
+                    importScripts is checked against script-src too.
+        style-src   'unsafe-inline' — Tailwind v4 and Monaco both inject
+                    styles at runtime, and the custom-CSS feature writes a
+                    <style> element.
+        font-src    jsdelivr — Monaco's codicon icon font.
+        connect-src googleapis — Firestore; api.github.com — repo/Gist
+                    integration; jsdelivr — Monaco module fetches.
+        worker-src  blob: — Monaco's cross-origin worker shim. The app's own
+                    diff worker is same-origin.
+
+      Deliberately NOT granting 'unsafe-eval': verified that no bundled
+      dependency calls global eval() or new Function().
+
+      Note: frame-ancestors is ignored in a meta tag and only works as a real
+      HTTP header, so it is omitted rather than giving false assurance. If
+      clickjacking protection matters, serve behind something that can set
+      headers (Cloudflare Pages, Netlify, nginx) and add it there.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+        style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+        font-src 'self' data: https://cdn.jsdelivr.net;
+        img-src 'self' data: blob:;
+        worker-src 'self' blob:;
+        connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://api.github.com https://cdn.jsdelivr.net;
+        base-uri 'self';
+        form-action 'self';
+      "
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <title>TextDiff Studio — Fast Side-by-Side Text &amp; Code Diff Tool</title>
+    <meta
+      name="description"
+      content="Compare text and code instantly in your browser. Side-by-side and unified diffs, syntax highlighting, 3-way merge, and shareable links. Runs entirely client-side — nothing is uploaded."
+    />
+    <meta name="theme-color" content="#0A0A0C" />
+
+    <!-- Open Graph / Twitter: this tool is shared by link, so the unfurl is
+         a large part of the first impression. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TextDiff Studio" />
+    <meta property="og:title" content="TextDiff Studio — Fast Side-by-Side Text &amp; Code Diff Tool" />
+    <meta
+      property="og:description"
+      content="Compare text and code instantly in your browser. Side-by-side and unified diffs, syntax highlighting, 3-way merge, and shareable links."
+    />
+    <meta property="og:url" content="https://solopass.github.io/Textdiff/" />
+    <meta property="og:image" content="https://solopass.github.io/Textdiff/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TextDiff Studio — Fast Side-by-Side Text &amp; Code Diff Tool" />
+    <meta
+      name="twitter:description"
+      content="Compare text and code instantly in your browser. Side-by-side and unified diffs, syntax highlighting, and 3-way merge."
+    />
+    <meta name="twitter:image" content="https://solopass.github.io/Textdiff/og-image.png" />
+    <link rel="canonical" href="https://solopass.github.io/Textdiff/" />
+
     <!-- Relative paths: this is served from a GitHub Pages project subpath
          (/Textdiff/), so a leading slash would resolve to the wrong origin root. -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="manifest" href="./manifest.json" />
     <script>
       if ('serviceWorker' in navigator) {
