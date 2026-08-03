@@ -5,7 +5,7 @@
 Node 22 or newer (jsdom, `@testing-library/jest-dom` and undici all require it;
 the version is pinned in `.nvmrc` and used by CI).
 
-```bash
+```powershell
 git clone https://github.com/Solopass/Textdiff.git
 cd Textdiff
 npm install
@@ -21,11 +21,15 @@ is required for ordinary frontend work.
 
 ## Before you open a PR
 
-```bash
+```powershell
 npm run typecheck
 npm test
 npm run build:web
 ```
+
+> `&&` chains only in PowerShell 7+. On Windows PowerShell 5.1 use `;` or run
+> each line separately — `;` runs the next command regardless of failure, so
+> check the output.
 
 CI runs exactly these three and blocks the deploy if any fail, so running them
 locally saves a round trip. There is no linter or formatter configured — match
@@ -34,7 +38,7 @@ the style of the file you're editing.
 ### Also do a browser pass
 
 The test suite covers pure logic; UI flows are not covered. After
-`npm run build:web && npm run preview`, check the browser console for CSP
+`npm run build:web` then `npm run preview`, check the browser console for CSP
 violations and exercise anything you touched. Changes to `index.html`,
 `vite.config.ts`, or anything involving Monaco especially warrant this — a bad
 CSP change white-screens the app without failing a single test.
@@ -47,8 +51,8 @@ reasoning; the short version:
 - **Don't add heavy dependencies to the initial bundle.** Use `import()` at the
   call site or `React.lazy`. Adding a library to `manualChunks` does *not* make
   it lazy and can make it eager. Verify with:
-  ```bash
-  grep -oE 'assets/[A-Za-z0-9._-]+\.(js|css)' dist/index.html | sort -u
+  ```powershell
+  .\scripts\Check-Bundle.ps1
   ```
 - **Adding a persisted setting means three edits**, not one: the `tds_config`
   payload, the loader that reads it back, and the effect's dependency array.
@@ -64,7 +68,7 @@ reasoning; the short version:
 
 Vitest with jsdom, 72 tests in two layers.
 
-```bash
+```powershell
 npm test           # once
 npm run test:watch # watch mode
 ```

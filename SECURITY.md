@@ -34,7 +34,7 @@ The last two are disabled in the GitHub Pages build.
 `firestore.rules` is **not** deployed by the GitHub Actions workflow. Push it
 separately:
 
-```bash
+```powershell
 firebase deploy --only firestore:rules
 ```
 
@@ -68,12 +68,15 @@ client cannot mint a longer-lived link. The app refuses to render an expired
 document. Neither of those deletes anything, so run the cleanup job on a
 schedule — daily is ample:
 
-```bash
-npm install firebase-admin        # not a project dependency; server-only
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```powershell
+npm install firebase-admin       # not a project dependency; server-only
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\to\service-account.json"
 node scripts/cleanup-expired-shares.mjs --dry-run   # inspect first
 node scripts/cleanup-expired-shares.mjs
 ```
+
+On macOS or Linux use `export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json`
+instead.
 
 It uses the Admin SDK, which bypasses security rules — that is the only way to
 delete, since the rules deny deletes to every client. Keep the service account

@@ -64,7 +64,7 @@ See `.env.example` for the required environment variables.
 
 ## Quick start
 
-```bash
+```powershell
 git clone https://github.com/Solopass/Textdiff.git
 cd Textdiff
 npm install
@@ -75,7 +75,7 @@ The dev server runs on http://localhost:3000.
 
 To build and preview just the static frontend:
 
-```bash
+```powershell
 npm run build:web
 npm run preview
 ```
