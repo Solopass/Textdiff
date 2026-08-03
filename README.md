@@ -120,6 +120,7 @@ failing typecheck or test blocks the deploy.
 | [`ROADMAP.md`](ROADMAP.md) | What ships today and what's planned |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
 | [`docs/NEXT-STEPS.md`](docs/NEXT-STEPS.md) | Ordered checklist of what to do next, with verification steps |
+| [`docs/dev-sandbox-prompt.md`](docs/dev-sandbox-prompt.md) | Prompt for building a Docker/WSL sandbox with a real browser and Firebase emulator |
 
 ## Contributing
 
