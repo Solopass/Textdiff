@@ -22,22 +22,38 @@ is required for ordinary frontend work.
 ## Before you open a PR
 
 ```powershell
+npm run verify
+```
+
+That runs typecheck, tests, a production build, and a smoke test of the built
+bundle — the same four steps CI runs. Individually:
+
+```powershell
 npm run typecheck
 npm test
 npm run build:web
+npm run smoke
 ```
 
 > `&&` chains only in PowerShell 7+. On Windows PowerShell 5.1 use `;` or run
 > each line separately — `;` runs the next command regardless of failure, so
 > check the output.
 
-CI runs exactly these three and blocks the deploy if any fail, so running them
-locally saves a round trip. There is no linter or formatter configured — match
+CI runs exactly these and blocks the deploy if any fail, so running them
+locally saves a round trip.
+
+`npm run smoke` boots the *minified* bundle in jsdom and checks that React
+mounts, the toolbar renders, the palette opens by click and by Ctrl+K, and a
+diff renders. The other tests run against Vite's dev transform, so this catches
+a different class of problem: bad chunk boundaries, minifier bugs, or a module
+that throws at import time. There is no linter or formatter configured — match
 the style of the file you're editing.
 
 ### Also do a browser pass
 
-The test suite covers pure logic; UI flows are not covered. After
+`npm run smoke` gets close, but jsdom does not enforce Content Security Policy,
+has no layout engine, and cannot run Monaco. A bad CSP change white-screens the
+app while every check above still passes. After
 `npm run build:web` then `npm run preview`, check the browser console for CSP
 violations and exercise anything you touched. Changes to `index.html`,
 `vite.config.ts`, or anything involving Monaco especially warrant this — a bad

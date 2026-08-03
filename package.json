@@ -15,7 +15,9 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke-built-app.mjs",
+    "verify": "npm run typecheck && npm test && npm run build:web && npm run smoke"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
