@@ -260,6 +260,19 @@ the a11y checks and a smaller `App.tsx` in place first.
 
 ---
 
+## Optional: remove the manual browser step entirely
+
+Every remaining "you have to check this by hand" item exists because the
+automation has no real browser, no CDN access, and no Firebase emulator.
+`docs/dev-sandbox-prompt.md` is a ready-to-paste prompt for building a
+Docker + WSL sandbox that closes those gaps, with acceptance tests tied to the
+exact failures encountered.
+
+Worth doing if the browser pass starts feeling like a tax. Not required to
+ship.
+
+---
+
 ## Standing rules
 
 Learned the hard way during this work:
