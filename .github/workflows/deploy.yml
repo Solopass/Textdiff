@@ -39,6 +39,15 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Boots the minified production bundle in jsdom. Catches problems the
+      # dev-transform tests can't see: bad chunk boundaries, minifier bugs, or
+      # a module that throws at import time.
+      - name: Build
+        run: npm run build:web
+
+      - name: Smoke test the built app
+        run: npm run smoke
+
   build:
     # Gate the deploy: if typecheck or tests fail, nothing is published.
     needs: verify

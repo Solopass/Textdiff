@@ -17,15 +17,17 @@ All commands below are PowerShell, run from the repository root.
 
 ### 0.1 — Smoke test in a real browser
 
-The test suite covers logic and interaction under jsdom. It cannot catch a
-broken Content Security Policy, and a bad CSP white-screens the app without
-failing a single test. This step exists for that.
+`npm run verify` already boots the production bundle and confirms React mounts,
+the toolbar renders, the command palette works, and a diff renders — all green.
+
+What it cannot do is enforce a Content Security Policy or run Monaco, because
+jsdom does neither. A bad CSP white-screens the app while every automated check
+still passes. **That is the only reason this step exists**, so the console is
+what matters most below.
 
 ```powershell
 npm ci
-npm run typecheck
-npm test
-npm run build:web
+npm run verify      # typecheck + tests + build + smoke test of the built bundle
 npm run preview
 ```
 
