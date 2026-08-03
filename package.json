@@ -1,16 +1,21 @@
 {
-  "name": "react-example",
+  "name": "textdiff-studio",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "Fast, browser-based side-by-side and unified text/code comparison tool.",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:web": "vite build",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('server.js',{force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -19,17 +24,16 @@
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "fflate": "^0.8.2",
     "firebase": "^12.16.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "lz-string": "^1.5.0",
-    "motion": "^12.23.24",
     "node-diff3": "^3.2.1",
     "prismjs": "^1.30.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "react-simple-code-editor": "^0.14.1",
     "react-virtuoso": "^4.18.11",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
@@ -38,16 +42,15 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/prismjs": "^1.26.6",
-    "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "jsdom": "^30.0.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3",
     "vitest": "^4.1.10"
   }
 }

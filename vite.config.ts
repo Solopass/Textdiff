@@ -14,6 +14,31 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Only React is grouped by hand. Everything else is left to
+          // Rollup's own splitting, which derives chunks from the dynamic
+          // import() boundaries in the source.
+          //
+          // Naming a chunk here does NOT make it load lazily — laziness comes
+          // purely from how a module is imported. Worse, forcing a library
+          // into a named chunk can pull it into the entry's static graph and
+          // get it <link rel="modulepreload">-ed, which is how an earlier
+          // version of this config ended up eagerly downloading ~580KB of
+          // export libraries that almost nobody uses. Leave the heavy,
+          // action-triggered dependencies (firebase, jspdf, html2canvas,
+          // socket.io) alone so they stay async.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) {
+              return 'vendor-react';
+            }
+          },
+        },
+      },
+      chunkSizeWarningLimit: 700,
+    },
     test: {
       globals: true,
       environment: 'jsdom',

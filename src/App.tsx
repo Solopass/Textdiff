@@ -1,7 +1,30 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, Suspense, lazy } from "react";
 import { TableVirtuoso, Virtuoso } from "react-virtuoso";
-import { GitHubIntegration } from './components/GitHubIntegration';
-import { MultiplayerMode } from './components/MultiplayerMode';
+
+// Both of these are optional panels that most sessions never open, and
+// MultiplayerMode drags in the whole socket.io client. Loading them lazily
+// keeps that weight out of first paint.
+const GitHubIntegration = lazy(() =>
+  import('./components/GitHubIntegration').then((m) => ({ default: m.GitHubIntegration })),
+);
+const MultiplayerMode = lazy(() =>
+  import('./components/MultiplayerMode').then((m) => ({ default: m.MultiplayerMode })),
+);
+const FolderDiff = lazy(() =>
+  import('./components/FolderDiff').then((m) => ({ default: m.FolderDiff })),
+);
+
+/** Shared placeholder while a lazily-loaded panel is being fetched. */
+const PanelFallback = ({ label }: { label: string }) => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="flex items-center justify-center gap-3 h-full min-h-[120px] border border-[#334155] bg-[#0F172A] text-[#94A3B8] text-sm"
+  >
+    <span className="w-4 h-4 border-2 border-[#334155] border-t-[#34D399] rounded-full animate-spin" />
+    Loading {label}...
+  </div>
+);
 import {
   
   
@@ -49,422 +72,33 @@ import {
 import { LandingPage } from "./components/LandingPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { CloudSyncModal } from "./components/CloudSyncModal";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
-import { collection, addDoc, getDoc, doc } from "firebase/firestore";
-import { db } from "./firebase";
+import { CommandPalette, type Command } from "./components/CommandPalette";
+// jspdf, html2canvas and the Firebase SDK are all large and only needed for
+// specific user actions, so they are imported dynamically at their call sites
+// instead of being pulled into the initial bundle.
+import { getDb } from "./firebase";
+// Shared with the diff worker so statistics are computed identically on both
+// sides. Imported from lib/diffStats, NOT from ./diffWorker — the latter drags
+// the LCS engine and node-diff3 into the main bundle. See lib/diffStats.ts.
+import { computeDiffStats } from "./lib/diffStats";
 import LZString from "lz-string";
-import Prism from "prismjs";
-import "prismjs/themes/prism-tomorrow.css";
-import "prismjs/components/prism-javascript";
-import "prismjs/components/prism-typescript";
-import "prismjs/components/prism-python";
-import "prismjs/components/prism-json";
 
-type HistoryItem = {
-  id: string;
-  timestamp: number;
-  origText: string;
-  modText: string;
-};
-
-type WordPart = { text: string; type: "unchanged" | "add" | "del" };
-
-type DiffRow = {
-  type: "unchanged" | "add" | "del" | "folded";
-  lineA: string;
-  lineB: string;
-  lineNumA: number | null;
-  lineNumB: number | null;
-  partsA?: WordPart[];
-  partsB?: WordPart[];
-};
-
-const escapeHtml = (str: string) =>
-  str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-function highlightCode(
-  text: string,
-  theme:
-    | "dark"
-    | "light"
-    | "high-contrast"
-    | "custom"
-    | "dracula"
-    | "hacker"
-    | "solarized-light"
-    | "oceanic",
-  language: string = "javascript",
-) {
-  if (!text) return "";
-
-  if (language === "plain") return escapeHtml(text);
-  let lang = language;
-  if (!Prism.languages[lang]) lang = "javascript";
-
-  const getThemeClasses = (type: string) => {
-    const t = type.split(" ")[0];
-    if (theme === "custom") {
-      if (t === "comment") return "theme-comment italic";
-      if (t === "string" || t === "char" || t === "attr-value")
-        return "theme-string";
-      if (t === "keyword" || t === "builtin" || t === "tag")
-        return "theme-keyword font-semibold";
-      if (t === "number" || t === "boolean" || t === "constant")
-        return "theme-number";
-      if (t === "function" || t === "class-name") return "theme-function";
-      if (t === "operator" || t === "punctuation") return "theme-operator";
-      return "theme-fg";
-    }
-    if (theme === "high-contrast") {
-      if (t === "comment") return "text-[#A1A1AA] italic";
-      if (t === "string" || t === "char" || t === "attr-value")
-        return "text-[#FDE047]";
-      if (t === "keyword" || t === "builtin" || t === "tag")
-        return "text-[#F9A8D4] font-bold";
-      if (t === "number" || t === "boolean" || t === "constant")
-        return "text-[#D8B4FE] font-bold";
-      if (t === "function" || t === "class-name") return "text-[#93C5FD]";
-      if (t === "operator" || t === "punctuation") return "text-[#94A3B8]";
-      return "text-white";
-    } else if (theme === "light") {
-      if (t === "comment") return "text-[#94A3B8] italic";
-      if (t === "string" || t === "char" || t === "attr-value")
-        return "text-[#059669]";
-      if (t === "keyword" || t === "builtin" || t === "tag")
-        return "text-[#DB2777] font-semibold";
-      if (t === "number" || t === "boolean" || t === "constant")
-        return "text-[#7C3AED]";
-      if (t === "function" || t === "class-name") return "text-[#2563EB]";
-      if (t === "operator" || t === "punctuation") return "text-[#64748B]";
-      return "text-[#0F172A]";
-    } else {
-      // dark
-      if (t === "comment") return "text-[#64748B] italic";
-      if (t === "string" || t === "char" || t === "attr-value")
-        return "text-[#A7F3D0]";
-      if (t === "keyword" || t === "builtin" || t === "tag")
-        return "text-[#F472B6] font-semibold";
-      if (t === "number" || t === "boolean" || t === "constant")
-        return "text-[#C084FC]";
-      if (t === "function" || t === "class-name") return "text-[#60A5FA]";
-      if (t === "operator" || t === "punctuation") return "text-[#475569]";
-      return "text-[#E2E8F0]";
-    }
-  };
-
-  let html = "";
-  try {
-    const tokens = Prism.tokenize(text, Prism.languages[lang]);
-
-    const processToken = (token: any) => {
-      if (typeof token === "string") {
-        return escapeHtml(token);
-      }
-      if (Array.isArray(token.content)) {
-        return `<span class="${getThemeClasses(token.type)}">${token.content.map(processToken).join("")}</span>`;
-      }
-      return `<span class="${getThemeClasses(token.type)}">${escapeHtml(token.content)}</span>`;
-    };
-
-    html = tokens.map(processToken).join("");
-  } catch (e) {
-    html = escapeHtml(text);
-  }
-  return html;
-}
-
-function renderSearchHighlights(
-  text: string,
-  query: string,
-  activeIndex: number,
-  matchIndices: { index: number; length: number }[],
-) {
-  if (!query || matchIndices.length === 0) return "";
-
-  let html = "";
-  let lastIdx = 0;
-
-  matchIndices.forEach((matchInfo, i) => {
-    html += escapeHtml(text.slice(lastIdx, matchInfo.index));
-    const isActive = i === activeIndex;
-    const bgClass = isActive ? "bg-[#F59E0B]/50" : "bg-[#FCD34D]/30";
-    html += `<mark class="${bgClass} text-transparent rounded-sm">${escapeHtml(text.slice(matchInfo.index, matchInfo.index + matchInfo.length))}</mark>`;
-    lastIdx = matchInfo.index + matchInfo.length;
-  });
-
-  html += escapeHtml(text.slice(lastIdx));
-  return html;
-}
-
-function exportHighlightedHtml(
-  text: string,
-  theme:
-    | "dark"
-    | "light"
-    | "high-contrast"
-    | "custom"
-    | "dracula"
-    | "hacker"
-    | "solarized-light"
-    | "oceanic",
-) {
-  if (!text) return "";
-  const regex =
-    /(\/\/.*|\/\*[\s\S]*?\*\/)|(["'`])(?:(?=(\\?))\3.)*?\2|\b(const|let|var|function|return|if|else|for|while|class|import|export|from|switch|case|break|continue|default|async|await|new|this|true|false|null|undefined)\b|\b(\d+(?:\.\d+)?)\b/g;
-
-  let lastIndex = 0;
-  let html = "";
-  let match;
-
-  const getThemeStyles = (type: string) => {
-    if (theme === "high-contrast") {
-      if (type === "comment") return "color: #A1A1AA; font-style: italic;";
-      if (type === "string") return "color: #FDE047;";
-      if (type === "keyword") return "color: #F9A8D4; font-weight: bold;";
-      if (type === "number") return "color: #D8B4FE; font-weight: bold;";
-      return "color: #ffffff;";
-    } else if (theme === "dracula") {
-      if (type === "comment") return "color: #6272A4; font-style: italic;";
-      if (type === "string") return "color: #F1FA8C;";
-      if (type === "keyword") return "color: #FF79C6; font-weight: 600;";
-      if (type === "number") return "color: #BD93F9;";
-      return "color: #F8F8F2;";
-    } else if (theme === "hacker") {
-      if (type === "comment") return "color: #008F11; font-style: italic;";
-      if (type === "string")
-        return "color: #00FF41; text-shadow: 0 0 2px #00FF41;";
-      if (type === "keyword") return "color: #00FF41; font-weight: 900;";
-      if (type === "number") return "color: #00FF41; font-weight: bold;";
-      return "color: #00FF41;";
-    } else if (theme === "solarized-light") {
-      if (type === "comment") return "color: #93A1A1; font-style: italic;";
-      if (type === "string") return "color: #2AA198;";
-      if (type === "keyword") return "color: #859900; font-weight: 600;";
-      if (type === "number") return "color: #D33682;";
-      return "color: #657B83;";
-    } else if (theme === "oceanic") {
-      if (type === "comment") return "color: #65737E; font-style: italic;";
-      if (type === "string") return "color: #99C794;";
-      if (type === "keyword") return "color: #C594C5; font-weight: 600;";
-      if (type === "number") return "color: #F99157;";
-      return "color: #D8DEE9;";
-    } else if (theme === "light") {
-      if (type === "comment") return "color: #94A3B8; font-style: italic;";
-      if (type === "string") return "color: #059669;";
-      if (type === "keyword") return "color: #DB2777; font-weight: 600;";
-      if (type === "number") return "color: #7C3AED;";
-      return "color: #0F172A;";
-    } else {
-      // dark
-      if (type === "comment") return "color: #64748B; font-style: italic;";
-      if (type === "string") return "color: #A7F3D0;";
-      if (type === "keyword") return "color: #F472B6; font-weight: 600;";
-      if (type === "number") return "color: #C084FC;";
-      return "color: #E2E8F0;";
-    }
-  };
-
-  while ((match = regex.exec(text)) !== null) {
-    html += escapeHtml(text.slice(lastIndex, match.index));
-
-    if (match[1]) {
-      html += `<span style="${getThemeStyles("comment")}">${escapeHtml(match[0])}</span>`;
-    } else if (match[2]) {
-      html += `<span style="${getThemeStyles("string")}">${escapeHtml(match[0])}</span>`;
-    } else if (match[4]) {
-      html += `<span style="${getThemeStyles("keyword")}">${escapeHtml(match[0])}</span>`;
-    } else if (match[5]) {
-      html += `<span style="${getThemeStyles("number")}">${escapeHtml(match[0])}</span>`;
-    } else {
-      html += escapeHtml(match[0]);
-    }
-
-    lastIndex = regex.lastIndex;
-  }
-
-  html += escapeHtml(text.slice(lastIndex));
-
-  const bg =
-    theme === "light"
-      ? "#ffffff"
-      : theme === "high-contrast"
-        ? "#000000"
-        : theme === "dracula"
-          ? "#282A36"
-          : theme === "hacker"
-            ? "#0D0208"
-            : theme === "solarized-light"
-              ? "#FDF6E3"
-              : theme === "oceanic"
-                ? "#1B2B34"
-                : "#020617";
-  const fg =
-    theme === "light"
-      ? "#0F172A"
-      : theme === "high-contrast"
-        ? "#ffffff"
-        : theme === "dracula"
-          ? "#F8F8F2"
-          : theme === "hacker"
-            ? "#00FF41"
-            : theme === "solarized-light"
-              ? "#657B83"
-              : theme === "oceanic"
-                ? "#D8DEE9"
-                : "#E2E8F0";
-
-  return `<pre style="background-color: ${bg}; color: ${fg}; padding: 1rem; font-family: monospace; font-size: 12px; line-height: 1.5rem; overflow: auto; white-space: pre-wrap; word-break: break-all;"><code>${html}</code></pre>`;
-}
-
-import Editor, { useMonaco } from "@monaco-editor/react";
-
-const TextAreaWithLineNumbers = ({
-  value,
-  onChange,
-  placeholder,
-  showLineNums,
-  syntaxTheme,
-  id,
-  onScroll,
-  language = "javascript",
-  wordWrap = false,
-  customTheme,
-}: any) => {
-  const monaco = useMonaco();
-
-  React.useEffect(() => {
-    if (monaco) {
-      if (syntaxTheme === "custom" && customTheme) {
-        monaco.editor.defineTheme("custom-theme", {
-          base: "vs-dark",
-          inherit: true,
-          rules: [
-            {
-              token: "comment",
-              foreground: customTheme.comment.replace("#", ""),
-            },
-            {
-              token: "string",
-              foreground: customTheme.string.replace("#", ""),
-            },
-            {
-              token: "keyword",
-              foreground: customTheme.keyword.replace("#", ""),
-            },
-            {
-              token: "number",
-              foreground: customTheme.number.replace("#", ""),
-            },
-          ],
-          colors: {
-            "editor.background": customTheme.bg,
-            "editor.foreground": customTheme.fg,
-          },
-        });
-      }
-
-      monaco.editor.defineTheme("dracula", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "6272A4", fontStyle: "italic" },
-          { token: "string", foreground: "F1FA8C" },
-          { token: "keyword", foreground: "FF79C6", fontStyle: "bold" },
-          { token: "number", foreground: "BD93F9" },
-        ],
-        colors: {
-          "editor.background": "#282A36",
-          "editor.foreground": "#F8F8F2",
-        },
-      });
-
-      monaco.editor.defineTheme("hacker", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "008F11", fontStyle: "italic" },
-          { token: "string", foreground: "00FF41" },
-          { token: "keyword", foreground: "00FF41", fontStyle: "bold" },
-          { token: "number", foreground: "00FF41" },
-        ],
-        colors: {
-          "editor.background": "#0D0208",
-          "editor.foreground": "#00FF41",
-          "editorCursor.foreground": "#00FF41",
-        },
-      });
-
-      monaco.editor.defineTheme("solarized-light", {
-        base: "vs",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "93A1A1", fontStyle: "italic" },
-          { token: "string", foreground: "2AA198" },
-          { token: "keyword", foreground: "859900", fontStyle: "bold" },
-          { token: "number", foreground: "D33682" },
-        ],
-        colors: {
-          "editor.background": "#FDF6E3",
-          "editor.foreground": "#657B83",
-        },
-      });
-
-      monaco.editor.defineTheme("oceanic", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "65737E", fontStyle: "italic" },
-          { token: "string", foreground: "99C794" },
-          { token: "keyword", foreground: "C594C5", fontStyle: "bold" },
-          { token: "number", foreground: "F99157" },
-        ],
-        colors: {
-          "editor.background": "#1B2B34",
-          "editor.foreground": "#D8DEE9",
-        },
-      });
-    }
-  }, [monaco, syntaxTheme, customTheme]);
-
-  const getMonacoTheme = () => {
-    if (syntaxTheme === "light") return "light";
-    if (syntaxTheme === "high-contrast") return "hc-black";
-    if (syntaxTheme === "custom") return "custom-theme";
-    if (
-      ["dracula", "hacker", "solarized-light", "oceanic"].includes(syntaxTheme)
-    )
-      return syntaxTheme;
-    return "vs-dark";
-  };
-
-  return (
-    <div
-      className={`flex w-full h-full min-h-[320px] rounded-md border ${syntaxTheme === "light" ? "border-[#E2E8F0]" : "border-[#334155]"}`}
-    >
-      <Editor
-        height="100%"
-        language={language}
-        theme={getMonacoTheme()}
-        value={value}
-        onChange={(val) => onChange(val || "")}
-        options={{
-          wordWrap: wordWrap ? "on" : "off",
-          lineNumbers: showLineNums ? "on" : "off",
-          minimap: { enabled: true },
-          padding: { top: 16 },
-          scrollBeyondLastLine: false,
-        }}
-      />
-    </div>
-  );
-};
-
-// Features that depend on the Node/Socket.IO/Gemini backend (server.ts).
-// GitHub Pages only serves static files, so these stay disabled until that
-// backend is deployed somewhere separately. Flip via .env: VITE_ENABLE_SERVER_FEATURES=true
-const SERVER_FEATURES_ENABLED = import.meta.env.VITE_ENABLE_SERVER_FEATURES === "true";
-const COMING_SOON_TITLE = "Coming soon — needs a live server, not available on GitHub Pages yet";
+import type { DiffRow, WordPart, HistoryItem } from "./lib/types";
+import { escapeHtml, sanitizeCustomCss } from "./lib/sanitize";
+import { safeSetItem } from "./lib/storage";
+import {
+  SERVER_FEATURES_ENABLED,
+  COMING_SOON_TITLE,
+  SHARE_TTL_DAYS,
+  SHARE_TTL_MS,
+} from "./lib/constants";
+import {
+  highlightCode,
+  renderSearchHighlights,
+  exportHighlightedHtml,
+} from "./lib/highlight";
+import { TextAreaWithLineNumbers } from "./components/EditorPane";
+import { ShortcutsModal } from "./components/ShortcutsModal";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<
@@ -640,7 +274,7 @@ export default function App() {
       },
     ];
     setSavedPresets(newPresets);
-    localStorage.setItem("tds_presets", JSON.stringify(newPresets));
+    safeSetItem("tds_presets", JSON.stringify(newPresets));
     setPresetNameInput("");
   };
 
@@ -697,17 +331,81 @@ export default function App() {
   const [splitRatio, setSplitRatio] = useState(50);
   const isDraggingSplitter = useRef(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [showFolderDiff, setShowFolderDiff] = useState(false);
+
+  // Side-by-side needs ~600px to be legible; below that it becomes a
+  // horizontally-scrolling strip. Track the viewport so the diff can fall back
+  // to unified without discarding the user's stored preference.
+  // matchMedia is absent in jsdom and in older embedded webviews, so every
+  // access is guarded rather than assumed.
+  const NARROW_QUERY = "(max-width: 640px)";
+  const [isNarrow, setIsNarrow] = useState(
+    () => window.matchMedia?.(NARROW_QUERY).matches ?? false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.(NARROW_QUERY);
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
+    // addListener is the deprecated spelling, still the only one in Safari <14.
+    if (mq.addEventListener) {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  // What is actually rendered. `viewMode` remains the persisted preference.
+  const effectiveViewMode = isNarrow ? "unified" : viewMode;
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [isDiffing, setIsDiffing] = useState(false);
+  // Which export is currently running, so the button can show progress while
+  // its (lazily fetched) library downloads.
+  const [isExporting, setIsExporting] = useState<"png" | "pdf" | null>(null);
+  // Names of files loaded by drop/upload, shown in the pane headers so it's
+  // clear what's being compared.
+  const [fileNameA, setFileNameA] = useState("");
+  const [fileNameB, setFileNameB] = useState("");
+  // Which pane is currently under a drag, for the drop highlight.
+  const [dragTarget, setDragTarget] = useState<"a" | "b" | "base" | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  // Monotonic id for diff requests. The worker processes messages serially but
+  // a slow run can still resolve after a newer one was posted, so results
+  // carrying a stale id are discarded rather than rendered over fresh output.
+  const diffRequestId = useRef(0);
+  const [diffError, setDiffError] = useState<string | null>(null);
 
   useEffect(() => {
-    workerRef.current = new Worker(
-      new URL("./diffWorker.ts", import.meta.url),
-      { type: "module" },
-    );
+    const worker = new Worker(new URL("./diffWorker.ts", import.meta.url), {
+      type: "module",
+    });
+
+    worker.onmessage = (e) => {
+      if (e.data?.requestId !== diffRequestId.current) return; // stale result
+      if (e.data?.error) {
+        setDiffError(e.data.error);
+        setDiffResult(null);
+      } else {
+        setDiffError(null);
+        setDiffResult(e.data.rawDiff);
+      }
+      setIsDiffing(false);
+    };
+
+    // Without this an exception inside the worker leaves isDiffing stuck true
+    // and the UI spinning forever with no way to recover.
+    worker.onerror = (event) => {
+      console.error("Diff worker failed", event);
+      setDiffError(
+        "The diff engine crashed on this input. Try smaller files or disable 3-way mode.",
+      );
+      setIsDiffing(false);
+    };
+
+    workerRef.current = worker;
     return () => {
-      workerRef.current?.terminate();
+      worker.terminate();
+      workerRef.current = null;
     };
   }, []);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -796,6 +494,11 @@ export default function App() {
       setOrigText("");
       setModText("");
       setDiffResult(null);
+      setDiffError(null);
+      // Otherwise the pane headers keep showing filenames for content that
+      // is no longer loaded.
+      setFileNameA("");
+      setFileNameB("");
     }
   };
 
@@ -835,7 +538,7 @@ export default function App() {
     };
     setHistory((prev) => {
       const newHistory = [newItem, ...prev].slice(0, 20);
-      localStorage.setItem("tds_history", JSON.stringify(newHistory));
+      safeSetItem("tds_history", JSON.stringify(newHistory));
       return newHistory;
     });
 
@@ -867,12 +570,17 @@ export default function App() {
     setOrigText(modText);
     setModText("");
     setDiffResult(null);
+    setFileNameA(fileNameB);
+    setFileNameB("");
   };
 
   const swapTexts = () => {
     playSound('click');
     setOrigText(modText);
     setModText(origText);
+    // Keep the filename labels attached to their content.
+    setFileNameA(fileNameB);
+    setFileNameB(fileNameA);
     if (diffResult) {
       runDiff(modText, origText, ignoreWs, ignoreCase, trimBlankLines);
     }
@@ -926,18 +634,43 @@ export default function App() {
 
     const loadFromId = async (id: string) => {
       try {
+        // Firestore is pulled in on demand; see getDb() in ./firebase.
+        const [{ getDoc, doc }, db] = await Promise.all([
+          import("firebase/firestore"),
+          getDb(),
+        ]);
         const docSnap = await getDoc(doc(db, "diffs", id));
-        if (docSnap.exists()) {
-          const data = JSON.parse(docSnap.data().data);
-          if (data.origText !== undefined) setOrigText(data.origText);
-          if (data.modText !== undefined) setModText(data.modText);
-          if (data.baseText !== undefined) setBaseText(data.baseText);
-          if (data.isThreeWay !== undefined) setIsThreeWay(data.isThreeWay);
-          if (data.language) setLanguage(data.language);
-          if (data.note) setLoadedAnnotation(data.note);
+        if (!docSnap.exists()) {
+          setDiffError(
+            "That share link doesn't exist. It may have expired or the address may be incomplete.",
+          );
+          return;
         }
+
+        const raw = docSnap.data();
+
+        // Refuse expired links even if the document is still present.
+        // Deletion happens out of band (a scheduled job — see SECURITY.md), so
+        // a document can outlive its expiry; the client must not rely on
+        // cleanup having run. Links created before expiry existed have no
+        // `expiresAt` and are treated as non-expiring.
+        if (typeof raw.expiresAt === "number" && Date.now() > raw.expiresAt) {
+          setDiffError(
+            "This share link has expired. Ask whoever sent it to create a new one.",
+          );
+          return;
+        }
+
+        const data = JSON.parse(raw.data);
+        if (data.origText !== undefined) setOrigText(data.origText);
+        if (data.modText !== undefined) setModText(data.modText);
+        if (data.baseText !== undefined) setBaseText(data.baseText);
+        if (data.isThreeWay !== undefined) setIsThreeWay(data.isThreeWay);
+        if (data.language) setLanguage(data.language);
+        if (data.note) setLoadedAnnotation(data.note);
       } catch (e) {
         console.error("Failed to load from Firestore", e);
+        setDiffError("Could not load that share link. Please try again.");
       }
     };
 
@@ -1000,11 +733,47 @@ export default function App() {
     setIsLoaded(true);
   }, []);
 
+  // The "Custom CSS Injector" wrote to state but was never applied to the
+  // document, so the whole feature silently did nothing. Manage a single
+  // dedicated <style> element and keep its contents in sync.
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem("tds_origText", origText);
-      localStorage.setItem("tds_modText", modText);
-      localStorage.setItem(
+    const STYLE_ID = "tds-custom-css";
+    let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+
+    if (!customCSS.trim()) {
+      el?.remove();
+      return;
+    }
+
+    if (!el) {
+      el = document.createElement("style");
+      el.id = STYLE_ID;
+      // Appended last so user rules win over the app's own stylesheet
+      // without needing !important everywhere.
+      document.head.appendChild(el);
+    }
+    // textContent, never innerHTML — the latter would parse the string as
+    // markup before it ever reached the CSS parser.
+    el.textContent = sanitizeCustomCss(customCSS);
+
+    return () => {
+      document.getElementById(STYLE_ID)?.remove();
+    };
+  }, [customCSS]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    // Debounced: this effect fires on every keystroke in either editor, and
+    // localStorage writes are synchronous + block the main thread.
+    const timer = setTimeout(() => {
+      // Every key here must match the ones read back in the loader effect
+      // above. They previously drifted apart, so uiFontSize/uiTexture/
+      // uiMotion/customCSS/uiSound/uiGlass were read but never written and
+      // silently reset on each reload.
+      safeSetItem("tds_origText", origText);
+      safeSetItem("tds_modText", modText);
+      safeSetItem(
         "tds_config",
         JSON.stringify({
           viewMode,
@@ -1020,9 +789,17 @@ export default function App() {
           uiFont,
           uiRadius,
           uiTint,
+          uiFontSize,
+          uiTexture,
+          uiMotion,
+          customCSS,
+          uiSound,
+          uiGlass,
         }),
       );
-    }
+    }, 400);
+
+    return () => clearTimeout(timer);
   }, [
     origText,
     modText,
@@ -1036,10 +813,58 @@ export default function App() {
     wordWrap,
     syntaxTheme,
     language,
+    appLayout,
+    uiFont,
+    uiRadius,
+    uiTint,
+    uiFontSize,
+    uiTexture,
+    uiMotion,
+    customCSS,
+    uiSound,
+    uiGlass,
+  ]);
+
+  // Escape closes the topmost overlay. None of the modals handled this, so a
+  // keyboard user who opened one had no way out without finding the X.
+  useEffect(() => {
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // The palette handles its own Escape and stops propagation, so if it is
+      // open we must not also close whatever is behind it.
+      if (showPalette) return;
+      if (isFullscreen) return setIsFullscreen(false);
+      if (showHelpModal) return setShowHelpModal(false);
+      if (showHistoryModal) return setShowHistoryModal(false);
+      if (showCustomizeModal) return setShowCustomizeModal(false);
+      if (showFolderDiff) return setShowFolderDiff(false);
+      if (showGitModal) return setShowGitModal(false);
+      if (showGithubPanel) return setShowGithubPanel(false);
+      if (showMultiplayer) return setShowMultiplayer(false);
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [
+    showPalette,
+    isFullscreen,
+    showHelpModal,
+    showHistoryModal,
+    showGitModal,
+    showCustomizeModal,
+    showFolderDiff,
+    showGithubPanel,
+    showMultiplayer,
   ]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K / Cmd+K toggles the command palette. Checked first so it works
+      // even while focus is inside an editor.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+        return;
+      }
       // Ctrl+Enter or Cmd+Enter
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
@@ -1100,26 +925,84 @@ export default function App() {
     setSampleIndex((sampleIndex + 1) % templates.length);
   };
 
-  const handleFileUpload = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    setTarget: (val: string) => void,
-  ) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  /**
+   * Reads a dropped or selected file as text.
+   *
+   * The previous version passed any file straight to readAsText, so dropping
+   * a PNG or a 500MB archive silently filled an editor with mojibake or hung
+   * the tab. This rejects oversized files up front and sniffs for NUL bytes,
+   * which no text encoding uses but virtually every binary format contains.
+   */
+  const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+  const readTextFile = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      if (file.size > MAX_FILE_BYTES) {
+        reject(
+          new Error(
+            `"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB, over the 15MB limit.`,
+          ),
+        );
+        return;
+      }
       const reader = new FileReader();
-      reader.onload = (ev) => setTarget(ev.target?.result as string);
+      reader.onerror = () => reject(new Error(`Could not read "${file.name}".`));
+      reader.onload = (ev) => {
+        const text = (ev.target?.result as string) ?? "";
+        if (text.slice(0, 8000).includes("\u0000")) {
+          reject(new Error(`"${file.name}" looks like a binary file, not text.`));
+          return;
+        }
+        resolve(text);
+      };
       reader.readAsText(file);
+    });
+
+  const loadFileInto = async (
+    file: File,
+    setTarget: (val: string) => void,
+    setName: (val: string) => void,
+  ) => {
+    try {
+      const text = await readTextFile(file);
+      setTarget(text);
+      setName(file.name);
+      playSound("success");
+    } catch (err: any) {
+      setDiffError(err?.message || "Could not read that file.");
     }
   };
 
-  const handleDrop = (e: React.DragEvent, setTarget: (val: string) => void) => {
+  const handleFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    setTarget: (val: string) => void,
+    setName: (val: string) => void = () => {},
+  ) => {
+    const file = e.target.files?.[0];
+    if (file) loadFileInto(file, setTarget, setName);
+    // Reset so selecting the same file twice in a row still fires onChange.
+    e.target.value = "";
+  };
+
+  const handleDrop = (
+    e: React.DragEvent,
+    setTarget: (val: string) => void,
+    setName: (val: string) => void = () => {},
+  ) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setTarget(ev.target?.result as string);
-      reader.readAsText(file);
+    setDragTarget(null);
+    const files: File[] = Array.from(e.dataTransfer.files ?? []);
+    if (!files.length) return;
+
+    // Dropping two files at once onto either pane is treated as "compare
+    // these", filling both sides in the order they were dropped. This is the
+    // fastest path to a diff and previously wasn't possible at all.
+    if (files.length >= 2) {
+      loadFileInto(files[0], setOrigText, setFileNameA);
+      loadFileInto(files[1], setModText, setFileNameB);
+      return;
     }
+    loadFileInto(files[0], setTarget, setName);
   };
 
   /**
@@ -1198,6 +1081,16 @@ export default function App() {
 
     const m = aLines.length;
     const n = bLines.length;
+
+    // Mirror of the worker's guard (see MAX_DP_CELLS in diffWorker.ts). This
+    // main-thread copy only runs where Worker is unavailable, but an
+    // unbounded (m+1)x(n+1) allocation would hang the tab outright here.
+    if ((m + 1) * (n + 1) > 12_000_000) {
+      throw new Error(
+        `Diff too large: ${m} x ${n} lines. Try comparing smaller files.`,
+      );
+    }
+
     const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
 
     for (let i = 0; i < m; i++) {
@@ -1297,15 +1190,43 @@ export default function App() {
         isThreeWay,
         note: note || "",
       };
+      const payload = JSON.stringify(data);
+
+      // Mirrors the ceiling in firestore.rules. Checking here turns an opaque
+      // PERMISSION_DENIED into an actionable message.
+      const MAX_SHARE_BYTES = 900_000;
+      if (new Blob([payload]).size >= MAX_SHARE_BYTES) {
+        setIsSharing(false);
+        alert(
+          "This comparison is too large to share as a permanent link (limit ~900KB). " +
+            "Try sharing a smaller excerpt, or export the diff as a file instead.",
+        );
+        return;
+      }
+
+      // Firestore is pulled in on demand; see getDb() in ./firebase.
+      const [{ addDoc, collection }, db] = await Promise.all([
+        import("firebase/firestore"),
+        getDb(),
+      ]);
+      const now = Date.now();
       const docRef = await addDoc(collection(db, "diffs"), {
-        data: JSON.stringify(data),
-        timestamp: Date.now(),
+        data: payload,
+        timestamp: now,
+        // Shared links expire. Without this, every diff anyone has ever shared
+        // stays publicly readable forever with no way to revoke it. The field
+        // is enforced by firestore.rules on create, checked on read below, and
+        // is what a scheduled cleanup job queries on. See SECURITY.md.
+        expiresAt: now + SHARE_TTL_MS,
       });
       const url = new URL(window.location.href);
       url.searchParams.set("id", docRef.id);
       url.hash = ""; // clear hash if any
       await navigator.clipboard.writeText(url.toString());
-      alert("Permanent Shareable URL copied to clipboard!");
+      alert(
+        `Shareable URL copied to clipboard.\n\n` +
+          `Anyone with this link can read the comparison. It expires in ${SHARE_TTL_DAYS} days.`,
+      );
     } catch (err) {
       console.error("Failed to create share link:", err);
       // Fallback to local hash
@@ -1354,7 +1275,7 @@ export default function App() {
         modText: mod,
       };
       const newHistory = [newItem, ...prev].slice(0, 20);
-      localStorage.setItem("tds_history", JSON.stringify(newHistory));
+      safeSetItem("tds_history", JSON.stringify(newHistory));
       return newHistory;
     });
     if (!orig && !mod) {
@@ -1364,11 +1285,12 @@ export default function App() {
 
     if (workerRef.current) {
       setIsDiffing(true);
-      workerRef.current.onmessage = (e) => {
-        setDiffResult(e.data.rawDiff);
-        setIsDiffing(false);
-      };
+      setDiffError(null);
+      // Handlers live on the worker itself (see the setup effect) so they are
+      // registered exactly once; here we only bump the id that gates them.
+      const requestId = ++diffRequestId.current;
       workerRef.current.postMessage({
+        requestId,
         orig,
         mod,
         base: baseText,
@@ -1378,6 +1300,7 @@ export default function App() {
         trimBlanks,
       });
     } else {
+      // Fallback for environments without Worker support (e.g. jsdom in tests).
       let aLines = orig ? orig.split("\n") : [];
       let bLines = mod ? mod.split("\n") : [];
 
@@ -1386,8 +1309,14 @@ export default function App() {
         bLines = bLines.filter((line) => line.trim() !== "");
       }
 
-      const diff = computeLCS(aLines, bLines, ws, caseInsensitive);
-      setDiffResult(diff);
+      try {
+        const diff = computeLCS(aLines, bLines, ws, caseInsensitive);
+        setDiffError(null);
+        setDiffResult(diff);
+      } catch (err: any) {
+        setDiffError(err?.message || "The diff engine failed on this input.");
+        setDiffResult(null);
+      }
     }
   };
 
@@ -1425,11 +1354,16 @@ export default function App() {
     downloadAnchorNode.remove();
   };
 
-  const exportImageReport = () => {
+  const exportImageReport = async () => {
     const container = document.getElementById("diff-render-area");
     if (!container) return;
 
-    html2canvas(container, { backgroundColor: "#020617" }).then((canvas) => {
+    try {
+      setIsExporting("png");
+      // html2canvas is ~200KB and most sessions never export, so it is
+      // fetched on first use rather than shipped in the initial bundle.
+      const { default: html2canvas } = await import("html2canvas");
+      const canvas = await html2canvas(container, { backgroundColor: "#020617" });
       const url = canvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = url;
@@ -1437,7 +1371,12 @@ export default function App() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    });
+    } catch (error) {
+      console.error("Failed to generate PNG", error);
+      alert("Failed to generate the PNG export.");
+    } finally {
+      setIsExporting(null);
+    }
   };
 
   const exportPdfReport = async () => {
@@ -1447,7 +1386,14 @@ export default function App() {
     if (!element) return;
 
     try {
-      // Create a clone to fix layout for PDF export if needed
+      setIsExporting("pdf");
+      // Both of these are large and only needed for this one action.
+      // Loaded in parallel so the wait is one round trip, not two.
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+
       const canvas = await html2canvas(element, {
         scale: 2,
         backgroundColor: "#020617",
@@ -1461,12 +1407,27 @@ export default function App() {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      // If content is taller than one page, we might need multiple pages or just fit to width
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      // Paginate instead of squashing everything onto page one: a long diff
+      // previously rendered off the bottom of a single A4 page and was lost.
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      if (pdfHeight <= pageHeight) {
+        pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      } else {
+        let remaining = pdfHeight;
+        let offset = 0;
+        while (remaining > 0) {
+          pdf.addImage(imgData, "PNG", 0, -offset, pdfWidth, pdfHeight);
+          remaining -= pageHeight;
+          offset += pageHeight;
+          if (remaining > 0) pdf.addPage();
+        }
+      }
       pdf.save("diff_report.pdf");
     } catch (error) {
       console.error("Failed to generate PDF", error);
       alert("Failed to generate PDF report.");
+    } finally {
+      setIsExporting(null);
     }
   };
 
@@ -1486,18 +1447,16 @@ export default function App() {
   // Stats calculation
   const stats = useMemo(() => {
     if (!diffResult) return null;
-    let addCount = 0,
-      delCount = 0,
-      unchangedCount = 0;
-    diffResult.forEach((item) => {
-      if (item.type === "add") addCount++;
-      else if (item.type === "del") delCount++;
-      else unchangedCount++;
-    });
-    const totalLines = addCount + delCount + unchangedCount;
-    const similarity =
-      totalLines > 0 ? Math.round((unchangedCount / totalLines) * 100) : 100;
-    return { addCount, delCount, unchangedCount, similarity };
+    // Shared with the worker (see computeDiffStats in diffWorker.ts) so the
+    // displayed figures can't drift from the ones the engine reports. The
+    // aliased names keep the existing JSX unchanged.
+    const { adds, dels, unchanged, similarity } = computeDiffStats(diffResult);
+    return {
+      addCount: adds,
+      delCount: dels,
+      unchangedCount: unchanged,
+      similarity,
+    };
   }, [diffResult]);
 
   const intensityMap = useMemo(() => {
@@ -1710,6 +1669,197 @@ Date: ${new Date().toLocaleString()}
     URL.revokeObjectURL(url);
   };
 
+  // Every palette entry maps to an action that already exists elsewhere in the
+  // UI — the palette is a second route to them, never the only route.
+  const paletteCommands: Command[] = [
+    {
+      id: "run-diff",
+      title: "Run comparison",
+      group: "Diff",
+      shortcut: "Ctrl+Enter",
+      keywords: "compare execute",
+      run: () => runDiff(),
+    },
+    {
+      id: "swap",
+      title: "Swap A and B",
+      group: "Diff",
+      shortcut: "Ctrl+Shift+S",
+      keywords: "reverse invert switch",
+      run: swapTexts,
+    },
+    {
+      id: "merge",
+      title: "Merge B into A",
+      group: "Diff",
+      keywords: "apply accept",
+      run: handleMergeBToA,
+    },
+    {
+      id: "clear",
+      title: "Clear all text",
+      group: "Diff",
+      keywords: "reset empty delete",
+      run: clearAll,
+    },
+    {
+      id: "sample",
+      title: "Load sample text",
+      group: "Diff",
+      keywords: "example demo template",
+      run: loadSample,
+    },
+    {
+      id: "next-change",
+      title: "Jump to next change",
+      group: "Navigate",
+      disabled: !diffResult,
+      run: scrollToNextDiff,
+    },
+    {
+      id: "prev-change",
+      title: "Jump to previous change",
+      group: "Navigate",
+      disabled: !diffResult,
+      run: scrollToPrevDiff,
+    },
+    {
+      id: "view-split",
+      title: "Switch to split view",
+      group: "View",
+      keywords: "side by side columns",
+      run: () => setViewMode("split"),
+    },
+    {
+      id: "view-unified",
+      title: "Switch to unified view",
+      group: "View",
+      keywords: "inline single column",
+      run: () => setViewMode("unified"),
+    },
+    {
+      id: "fullscreen",
+      title: isFullscreen ? "Exit fullscreen" : "Enter fullscreen",
+      group: "View",
+      keywords: "expand maximize zen",
+      run: () => setIsFullscreen(!isFullscreen),
+    },
+    {
+      id: "toggle-wrap",
+      title: wordWrap ? "Disable word wrap" : "Enable word wrap",
+      group: "View",
+      run: () => setWordWrap(!wordWrap),
+    },
+    {
+      id: "toggle-linenums",
+      title: showLineNums ? "Hide line numbers" : "Show line numbers",
+      group: "View",
+      run: () => setShowLineNums(!showLineNums),
+    },
+    {
+      id: "toggle-fold",
+      title: foldUnchanged ? "Expand unchanged lines" : "Fold unchanged lines",
+      group: "View",
+      keywords: "collapse context",
+      run: () => setFoldUnchanged(!foldUnchanged),
+    },
+    {
+      id: "toggle-ws",
+      title: ignoreWs ? "Stop ignoring whitespace" : "Ignore whitespace",
+      group: "Filters",
+      run: () => setIgnoreWs(!ignoreWs),
+    },
+    {
+      id: "toggle-case",
+      title: ignoreCase ? "Stop ignoring case" : "Ignore case",
+      group: "Filters",
+      run: () => setIgnoreCase(!ignoreCase),
+    },
+    {
+      id: "toggle-blanks",
+      title: trimBlankLines ? "Keep blank lines" : "Trim blank lines",
+      group: "Filters",
+      run: () => setTrimBlankLines(!trimBlankLines),
+    },
+    {
+      id: "export-html",
+      title: "Export as HTML",
+      group: "Export",
+      disabled: !diffResult,
+      run: exportHtmlReport,
+    },
+    {
+      id: "export-pdf",
+      title: "Export as PDF",
+      group: "Export",
+      disabled: !diffResult || isExporting !== null,
+      run: exportPdfReport,
+    },
+    {
+      id: "export-png",
+      title: "Export as PNG",
+      group: "Export",
+      keywords: "image screenshot",
+      disabled: !diffResult || isExporting !== null,
+      run: exportImageReport,
+    },
+    {
+      id: "export-json",
+      title: "Export raw diff as JSON",
+      group: "Export",
+      disabled: !diffResult,
+      run: exportRawDiff,
+    },
+    {
+      id: "share",
+      title: "Create share link",
+      group: "Share",
+      keywords: "url permalink copy",
+      run: shareUrl,
+    },
+    {
+      id: "history",
+      title: "Open history",
+      group: "Share",
+      keywords: "previous past recent",
+      run: () => setShowHistoryModal(true),
+    },
+    {
+      id: "git-conflict",
+      title: "Open Git conflict resolver",
+      group: "Tools",
+      keywords: "merge markers HEAD",
+      run: () => setShowGitModal(true),
+    },
+    {
+      id: "folder-diff",
+      title: "Compare folders or ZIP archives",
+      group: "Tools",
+      keywords: "directory tree zip archive bulk",
+      run: () => setShowFolderDiff(true),
+    },
+    {
+      id: "github",
+      title: "Browse a GitHub repository",
+      group: "Tools",
+      run: () => setShowGithubPanel(true),
+    },
+    {
+      id: "settings",
+      title: "Open settings",
+      group: "Tools",
+      keywords: "preferences customize theme",
+      run: () => setCurrentView("settings"),
+    },
+    {
+      id: "shortcuts",
+      title: "Show keyboard shortcuts",
+      group: "Tools",
+      keywords: "help keys",
+      run: () => setShowHelpModal(true),
+    },
+  ];
+
   if (currentView === "landing") {
     return <LandingPage onEnter={() => setCurrentView("app")} />;
   }
@@ -1780,7 +1930,8 @@ Date: ${new Date().toLocaleString()}
           <div className="flex items-center gap-2 bg-[#020617] p-1 border border-[#334155]">
             <button
               onClick={() => setViewMode("split")}
-              className={`flex items-center gap-2 px-3 py-1 text-xs font-mono font-medium transition-colors ${viewMode === "split" ? "bg-[#334155] text-white" : "text-[#64748B] hover:text-[#94A3B8]"}`}
+              title={isNarrow ? "Split view is unavailable on small screens" : "Side-by-side view"}
+              className={`flex items-center gap-2 px-3 py-1 text-xs font-mono font-medium transition-colors ${viewMode === "split" ? "bg-[#334155] text-white" : "text-[#64748B] hover:text-[#94A3B8]"} ${isNarrow ? "opacity-50" : ""}`}
             >
               <SplitSquareHorizontal className="w-3.5 h-3.5" />
               SIDE-BY-SIDE
@@ -1973,6 +2124,17 @@ Date: ${new Date().toLocaleString()}
               HELP
             </button>
             <button
+              onClick={() => setShowPalette(true)}
+              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2"
+              title="Command Palette (Ctrl+K)"
+            >
+              <Search className="w-3.5 h-3.5" aria-hidden="true" />
+              COMMANDS
+              <kbd className="text-[9px] text-[#64748B] border border-[#334155] px-1 py-0.5 font-mono ml-1">
+                ^K
+              </kbd>
+            </button>
+            <button
               onClick={clearAll}
               className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2 text-[#FCA5A5] hover:bg-[#450a0a]/30"
               title="Clear All Texts"
@@ -2029,6 +2191,7 @@ Date: ${new Date().toLocaleString()}
         
         {showGithubPanel && (
           <div className="mb-6 h-[400px]">
+            <Suspense fallback={<PanelFallback label="GitHub browser" />}>
             <GitHubIntegration onLoadFile={(text, name) => {
               // Intelligently put it in Orig if empty, else Mod
               if (!origText.trim()) setOrigText(text);
@@ -2036,17 +2199,20 @@ Date: ${new Date().toLocaleString()}
               setShowGithubPanel(false);
               playSound('success');
             }} />
+            </Suspense>
           </div>
         )}
 
         {showMultiplayer && (
           <div className="mb-6">
+            <Suspense fallback={<PanelFallback label="multiplayer session" />}>
             <MultiplayerMode onRunDiff={(textA, textB) => {
               setOrigText(textA);
               setModText(textB);
               setShowMultiplayer(false);
               runDiff(textA, textB);
             }} />
+            </Suspense>
           </div>
         )}
 
@@ -2059,14 +2225,23 @@ Date: ${new Date().toLocaleString()}
             className="flex flex-col"
           >
             <div
-              className="bg-[#020617] border border-[#334155] flex flex-col relative group h-full"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => handleDrop(e, setOrigText)}
+              className={`${dragTarget === "a" ? "ring-2 ring-[#34D399] ring-inset " : ""}bg-[#020617] border border-[#334155] flex flex-col relative group h-full`}
+              onDragOver={(e) => { e.preventDefault(); setDragTarget("a"); }}
+              onDragLeave={() => setDragTarget(null)}
+              onDrop={(e) => handleDrop(e, setOrigText, setFileNameA)}
             >
               <div className="bg-[#1E293B] px-4 py-2 flex justify-between items-center border-b border-[#334155]">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                   <FileText className="w-3.5 h-3.5 text-[#94A3B8]" /> Original
                   Text (Version A)
+                  {fileNameA && (
+                    <span
+                      title={fileNameA}
+                      className="ml-1 font-mono normal-case tracking-normal text-[10px] text-[#34D399] bg-[#064E3B]/40 border border-[#065F46] px-1.5 py-0.5 max-w-[160px] truncate"
+                    >
+                      {fileNameA}
+                    </span>
+                  )}
                 </h2>
                 <div className="flex items-center gap-3">
                   <button
@@ -2092,7 +2267,7 @@ Date: ${new Date().toLocaleString()}
                       type="file"
                       className="hidden"
                       accept=".txt,.md,.json,.js,.ts,.html,.css"
-                      onChange={(e) => handleFileUpload(e, setOrigText)}
+                      onChange={(e) => handleFileUpload(e, setOrigText, setFileNameA)}
                     />
                   </label>
                   <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 border border-blue-500/30 font-mono">
@@ -2130,14 +2305,23 @@ Date: ${new Date().toLocaleString()}
             className="flex flex-col"
           >
             <div
-              className="bg-[#020617] border border-[#334155] flex flex-col relative group h-full"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => handleDrop(e, setModText)}
+              className={`${dragTarget === "b" ? "ring-2 ring-[#34D399] ring-inset " : ""}bg-[#020617] border border-[#334155] flex flex-col relative group h-full`}
+              onDragOver={(e) => { e.preventDefault(); setDragTarget("b"); }}
+              onDragLeave={() => setDragTarget(null)}
+              onDrop={(e) => handleDrop(e, setModText, setFileNameB)}
             >
               <div className="bg-[#1E293B] px-4 py-2 flex justify-between items-center border-b border-[#334155]">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                   <FileText className="w-3.5 h-3.5 text-[#94A3B8]" /> Modified
                   Text (Version B)
+                  {fileNameB && (
+                    <span
+                      title={fileNameB}
+                      className="ml-1 font-mono normal-case tracking-normal text-[10px] text-[#34D399] bg-[#064E3B]/40 border border-[#065F46] px-1.5 py-0.5 max-w-[160px] truncate"
+                    >
+                      {fileNameB}
+                    </span>
+                  )}
                 </h2>
                 <div className="flex items-center gap-3">
                   <button
@@ -2171,7 +2355,7 @@ Date: ${new Date().toLocaleString()}
                       type="file"
                       className="hidden"
                       accept=".txt,.md,.json,.js,.ts,.html,.css"
-                      onChange={(e) => handleFileUpload(e, setModText)}
+                      onChange={(e) => handleFileUpload(e, setModText, setFileNameB)}
                     />
                   </label>
                   <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 border border-blue-500/30 font-mono">
@@ -2198,14 +2382,23 @@ Date: ${new Date().toLocaleString()}
         {/* Input Textareas Section (Mobile Fallback) */}
         <section className="flex flex-col lg:hidden gap-6">
           <div
-            className="bg-[#020617] border border-[#334155] flex flex-col relative group"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => handleDrop(e, setOrigText)}
+            className={`${dragTarget === "a" ? "ring-2 ring-[#34D399] ring-inset " : ""}bg-[#020617] border border-[#334155] flex flex-col relative group`}
+            onDragOver={(e) => { e.preventDefault(); setDragTarget("a"); }}
+            onDragLeave={() => setDragTarget(null)}
+            onDrop={(e) => handleDrop(e, setOrigText, setFileNameA)}
           >
             <div className="bg-[#1E293B] px-4 py-2 flex justify-between items-center border-b border-[#334155]">
               <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                 <FileText className="w-3.5 h-3.5 text-[#94A3B8]" /> Original
                 Text (Version A)
+                {fileNameA && (
+                  <span
+                    title={fileNameA}
+                    className="ml-1 font-mono normal-case tracking-normal text-[10px] text-[#34D399] bg-[#064E3B]/40 border border-[#065F46] px-1.5 py-0.5 max-w-[160px] truncate"
+                  >
+                    {fileNameA}
+                  </span>
+                )}
               </h2>
               <div className="flex items-center gap-3">
                 <button
@@ -2231,7 +2424,7 @@ Date: ${new Date().toLocaleString()}
                     type="file"
                     className="hidden"
                     accept=".txt,.md,.json,.js,.ts,.html,.css"
-                    onChange={(e) => handleFileUpload(e, setOrigText)}
+                    onChange={(e) => handleFileUpload(e, setOrigText, setFileNameA)}
                   />
                 </label>
                 <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 border border-blue-500/30 font-mono">
@@ -2255,9 +2448,10 @@ Date: ${new Date().toLocaleString()}
 
           {isThreeWay && (
             <div
-              className="bg-[#020617] border border-[#334155] flex flex-col relative group"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => handleDrop(e, setBaseText)}
+              className={`${dragTarget === "base" ? "ring-2 ring-[#34D399] ring-inset " : ""}bg-[#020617] border border-[#334155] flex flex-col relative group`}
+              onDragOver={(e) => { e.preventDefault(); setDragTarget("base"); }}
+              onDragLeave={() => setDragTarget(null)}
+              onDrop={(e) => handleDrop(e, setBaseText, () => {})}
             >
               <div className="bg-[#1E293B] px-4 py-2 flex justify-between items-center border-b border-[#334155]">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
@@ -2292,14 +2486,23 @@ Date: ${new Date().toLocaleString()}
           )}
 
           <div
-            className="bg-[#020617] border border-[#334155] flex flex-col relative group"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => handleDrop(e, setModText)}
+            className={`${dragTarget === "b" ? "ring-2 ring-[#34D399] ring-inset " : ""}bg-[#020617] border border-[#334155] flex flex-col relative group`}
+            onDragOver={(e) => { e.preventDefault(); setDragTarget("b"); }}
+            onDragLeave={() => setDragTarget(null)}
+            onDrop={(e) => handleDrop(e, setModText, setFileNameB)}
           >
             <div className="bg-[#1E293B] px-4 py-2 flex justify-between items-center border-b border-[#334155]">
               <h2 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                 <FileText className="w-3.5 h-3.5 text-[#94A3B8]" /> Modified
                 Text (Version B)
+                {fileNameB && (
+                  <span
+                    title={fileNameB}
+                    className="ml-1 font-mono normal-case tracking-normal text-[10px] text-[#34D399] bg-[#064E3B]/40 border border-[#065F46] px-1.5 py-0.5 max-w-[160px] truncate"
+                  >
+                    {fileNameB}
+                  </span>
+                )}
               </h2>
               <div className="flex items-center gap-3">
                 <button
@@ -2333,7 +2536,7 @@ Date: ${new Date().toLocaleString()}
                     type="file"
                     className="hidden"
                     accept=".txt,.md,.json,.js,.ts,.html,.css"
-                    onChange={(e) => handleFileUpload(e, setModText)}
+                    onChange={(e) => handleFileUpload(e, setModText, setFileNameB)}
                   />
                 </label>
                 <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 border border-blue-500/30 font-mono">
@@ -2355,6 +2558,42 @@ Date: ${new Date().toLocaleString()}
             />
           </div>
         </section>
+
+        {/* Diff engine failure (input too large, worker crash, etc.). Without
+            this the run would silently produce nothing. */}
+        {diffError && (
+          <section
+            role="alert"
+            className="bg-[#450A0A]/40 border border-[#EF4444] text-[#FCA5A5] p-4 flex items-start gap-3"
+          >
+            <X className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="flex-1 text-sm">
+              <p className="font-semibold mb-1">Comparison failed</p>
+              <p className="opacity-90">{diffError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDiffError(null)}
+              aria-label="Dismiss error"
+              className="p-1 hover:bg-[#EF4444]/20 rounded transition-colors"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </section>
+        )}
+
+        {/* Busy indicator: isDiffing was tracked but never surfaced, so large
+            comparisons looked like nothing had happened. */}
+        {isDiffing && (
+          <section
+            role="status"
+            aria-live="polite"
+            className="bg-[#111827] border border-[#334155] p-4 flex items-center justify-center gap-3 text-[#94A3B8] text-sm"
+          >
+            <span className="w-4 h-4 border-2 border-[#334155] border-t-[#60A5FA] rounded-full animate-spin" />
+            Computing diff…
+          </section>
+        )}
 
         {/* Diff Output Container */}
         {diffResult && stats && (
@@ -2441,17 +2680,29 @@ Date: ${new Date().toLocaleString()}
                   </button>
                   <button
                     onClick={exportPdfReport}
-                    className="px-3 py-1.5 border border-[#065F46] bg-[#064E3B] text-[#34D399] hover:bg-[#065F46] transition-colors text-xs font-mono flex items-center gap-2"
+                    disabled={isExporting !== null}
+                    aria-busy={isExporting === "pdf"}
+                    className="px-3 py-1.5 border border-[#065F46] bg-[#064E3B] text-[#34D399] hover:bg-[#065F46] transition-colors text-xs font-mono flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    EXPORT_PDF
+                    {isExporting === "pdf" ? (
+                      <span className="w-3.5 h-3.5 border-2 border-[#065F46] border-t-[#34D399] rounded-full animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    {isExporting === "pdf" ? "BUILDING..." : "EXPORT_PDF"}
                   </button>
                   <button
                     onClick={exportImageReport}
-                    className="px-3 py-1.5 border border-[#6D28D9] bg-[#4C1D95] text-[#C4B5FD] hover:bg-[#6D28D9] transition-colors text-xs font-mono flex items-center gap-2"
+                    disabled={isExporting !== null}
+                    aria-busy={isExporting === "png"}
+                    className="px-3 py-1.5 border border-[#6D28D9] bg-[#4C1D95] text-[#C4B5FD] hover:bg-[#6D28D9] transition-colors text-xs font-mono flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    EXPORT_PNG
+                    {isExporting === "png" ? (
+                      <span className="w-3.5 h-3.5 border-2 border-[#6D28D9] border-t-[#C4B5FD] rounded-full animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    {isExporting === "png" ? "BUILDING..." : "EXPORT_PNG"}
                   </button>
                   <button
                     onClick={() => setIsFullscreen(!isFullscreen)}
@@ -2536,26 +2787,33 @@ Date: ${new Date().toLocaleString()}
                         onClick={scrollToPrevDiff}
                         className="p-1 rounded transition-colors hover:bg-[#334155] text-[#94A3B8]"
                         title="Previous Change"
+                        aria-label="Jump to previous change"
                       >
-                        <ChevronUp className="w-4 h-4" />
+                        <ChevronUp className="w-4 h-4" aria-hidden="true" />
                       </button>
                       <button
                         onClick={scrollToNextDiff}
                         className="p-1 rounded transition-colors hover:bg-[#334155] text-[#94A3B8]"
                         title="Next Change"
+                        aria-label="Jump to next change"
                       >
-                        <ChevronDown className="w-4 h-4" />
+                        <ChevronDown className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                   )}
                   <span className="text-[10px] bg-[#334155] text-white px-2 py-0.5 border border-[#475569] font-mono">
-                    {viewMode === "split" ? "SPLIT_VIEW" : "UNIFIED_VIEW"}
+                    {effectiveViewMode === "split" ? "SPLIT_VIEW" : "UNIFIED_VIEW"}
+                    {isNarrow && viewMode === "split" && (
+                      <span className="ml-2 text-[9px] text-[#64748B] normal-case">
+                        (unified on small screens)
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>
 
               <div className="bg-black overflow-x-auto font-mono text-[11px] leading-relaxed p-4">
-                {viewMode === "split" ? (
+                {effectiveViewMode === "split" ? (
                   <TableVirtuoso
                     data={visibleDiffResult}
                     useWindowScroll
@@ -2869,7 +3127,12 @@ Date: ${new Date().toLocaleString()}
 
       {/* History Modal */}
       {showGitModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Git conflict resolver"
+        >
           <div className="bg-[#020617] border border-[#334155] rounded-xl w-full max-w-3xl flex flex-col max-h-[90vh] shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="p-4 border-b border-[#334155] flex justify-between items-center bg-[#0F172A] rounded-t-xl">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -2936,7 +3199,12 @@ Date: ${new Date().toLocaleString()}
       )}
 
       {showHistoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Diff history"
+        >
           <div className="bg-[#020617] border border-[#334155] max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center p-4 border-b border-[#334155] bg-[#1E293B]">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -3418,7 +3686,7 @@ Date: ${new Date().toLocaleString()}
                                 (_, idx) => idx !== i,
                               );
                               setSavedPresets(newPresets);
-                              localStorage.setItem(
+                              safeSetItem(
                                 "tds_presets",
                                 JSON.stringify(newPresets),
                               );
@@ -3456,96 +3724,31 @@ Date: ${new Date().toLocaleString()}
       )}
 
       {/* Help Modal */}
-      {showHelpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-[#020617] border border-[#334155] max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-4 border-b border-[#334155] bg-[#1E293B]">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Keyboard className="w-4 h-4 text-[#34D399]" />
-                Keyboard Shortcuts
-              </h3>
-              <button
-                onClick={() => setShowHelpModal(false)}
-                className="text-[#94A3B8] hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 font-mono text-xs">
-              <ul className="space-y-4 text-[#94A3B8]">
-                <li className="flex justify-between items-center border-b border-[#1E293B] pb-2">
-                  <span>Run Comparison</span>
-                  <span className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Ctrl
-                    </kbd>{" "}
-                    +{" "}
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Enter
-                    </kbd>
-                  </span>
-                </li>
-                <li className="flex justify-between items-center border-b border-[#1E293B] pb-2">
-                  <span>Swap Texts</span>
-                  <span className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Ctrl
-                    </kbd>{" "}
-                    +{" "}
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Shift
-                    </kbd>{" "}
-                    +{" "}
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      S
-                    </kbd>
-                  </span>
-                </li>
-                <li className="flex justify-between items-center border-b border-[#1E293B] pb-2">
-                  <span>Find in Text</span>
-                  <span className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Ctrl
-                    </kbd>{" "}
-                    +{" "}
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      F
-                    </kbd>
-                  </span>
-                </li>
-                <li className="flex justify-between items-center border-b border-[#1E293B] pb-2">
-                  <span>Next Search Match</span>
-                  <span className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Enter
-                    </kbd>
-                  </span>
-                </li>
-                <li className="flex justify-between items-center">
-                  <span>Prev Search Match</span>
-                  <span className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Shift
-                    </kbd>{" "}
-                    +{" "}
-                    <kbd className="px-1.5 py-0.5 bg-[#1E293B] border border-[#334155] rounded text-white">
-                      Enter
-                    </kbd>
-                  </span>
-                </li>
-              </ul>
+      {showFolderDiff && (
+        <Suspense fallback={<PanelFallback label="folder comparison" />}>
+          <FolderDiff
+            onClose={() => setShowFolderDiff(false)}
+            onOpenPair={(path, textA, textB) => {
+              setOrigText(textA);
+              setModText(textB);
+              setFileNameA(path);
+              setFileNameB(path);
+              setIsThreeWay(false);
+              setShowFolderDiff(false);
+              runDiff(textA, textB);
+            }}
+          />
+        </Suspense>
+      )}
 
-              <div className="mt-8 text-center">
-                <button
-                  onClick={() => setShowHelpModal(false)}
-                  className="px-4 py-2 border border-[#334155] bg-[#1E293B] text-white hover:bg-[#334155] transition-colors w-full"
-                >
-                  CLOSE
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        commands={paletteCommands}
+      />
+
+      {showHelpModal && (
+        <ShortcutsModal onClose={() => setShowHelpModal(false)} />
       )}
     </div>
   );

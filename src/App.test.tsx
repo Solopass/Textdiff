@@ -3,14 +3,15 @@ import App from "./App";
 import { describe, it, expect } from "vitest";
 
 describe("App", () => {
-  it("renders TextDiff title", () => {
+  it("renders the TextDiff title", () => {
     render(<App />);
     expect(screen.getByText(/TextDiff/i)).toBeInTheDocument();
   });
-});
 
-it("renders Open Studio button and enters main app", () => {
-  render(<App />);
-  const openBtn = screen.getByText(/Open Studio/i);
-  expect(openBtn).toBeInTheDocument();
+  // Previously this lived outside the describe block, so it ran as a
+  // top-level test detached from the suite it belongs to.
+  it("renders the Open Studio button", () => {
+    render(<App />);
+    expect(screen.getByText(/Open Studio/i)).toBeInTheDocument();
+  });
 });

@@ -80,7 +80,10 @@ export const SettingsPage: React.FC<Props> = ({ onBack }) => {
     updateTest(3, 'running');
     await new Promise(r => setTimeout(r, 300));
     try {
-      const { db } = await import('../firebase');
+      // Firestore is now initialised lazily, so this actually exercises the
+      // deferred-init path rather than reading an eagerly created instance.
+      const { getDb } = await import('../firebase');
+      const db = await getDb();
       if (!db) throw new Error('Firestore not initialized');
       updateTest(3, 'passed');
     } catch (e: any) {
@@ -94,9 +97,11 @@ export const SettingsPage: React.FC<Props> = ({ onBack }) => {
       <header className="bg-[#0F172A] border-b border-[#334155] px-6 py-4 flex items-center gap-4">
         <button 
           onClick={onBack}
+          aria-label="Back to editor"
+          title="Back to editor"
           className="p-2 hover:bg-[#1E293B] rounded transition-colors text-[#94A3B8] hover:text-white"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft className="w-5 h-5" aria-hidden="true" />
         </button>
         <h1 className="text-xl font-bold tracking-wide flex items-center gap-2">
           <Settings className="w-5 h-5 text-[#34D399]" />

@@ -87,15 +87,25 @@ export const CloudSyncModal: React.FC<Props> = ({ onClose, origText, setOrigText
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Cloud sync"
+    >
       <div className="bg-[#0F172A] border border-[#334155] w-full max-w-lg rounded shadow-2xl flex flex-col overflow-hidden">
         
         <div className="bg-[#1E293B] px-4 py-3 flex justify-between items-center border-b border-[#334155]">
           <h2 className="text-white font-bold tracking-widest text-sm flex items-center gap-2">
             <DownloadCloud className="w-4 h-4 text-[#34D399]" /> CLOUD SYNC
           </h2>
-          <button onClick={onClose} className="text-[#94A3B8] hover:text-white transition-colors p-1">
-            <X className="w-4 h-4" />
+          <button
+            onClick={onClose}
+            aria-label="Close cloud sync dialog"
+            title="Close"
+            className="text-[#94A3B8] hover:text-white transition-colors p-1"
+          >
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 

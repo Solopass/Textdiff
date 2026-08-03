@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # Quality gate. Runs on pull requests too, so a regression is caught before
+  # it reaches main rather than after it has already been published.
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +33,33 @@ jobs:
 
       - run: npm ci
 
-      # Only the static frontend (vite build) is deployed to Pages.
-      # server.ts (Socket.IO + Gemini proxy) is NOT part of this build —
-      # those features are disabled in the UI until that backend is hosted
-      # separately. See VITE_ENABLE_SERVER_FEATURES in .env.example.
-      - run: npx vite build
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+  build:
+    # Gate the deploy: if typecheck or tests fail, nothing is published.
+    needs: verify
+    # Skip publishing for pull requests — verify still runs on them.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Only the static frontend is deployed to Pages. server.ts (Socket.IO +
+      # Gemini proxy) is NOT part of this build — those features stay disabled
+      # in the UI until that backend is hosted separately.
+      # See VITE_ENABLE_SERVER_FEATURES in .env.example.
+      - run: npm run build:web
 
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -41,6 +67,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
