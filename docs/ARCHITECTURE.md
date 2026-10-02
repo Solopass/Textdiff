@@ -16,6 +16,7 @@ index.html          CSP, SEO/social meta, service worker registration
               │     └── useFocusTrap.ts  keyboard focus trapping for accessible modals
               ├── lib/
               │     ├── diffStats.ts   DiffRow/WordPart types + computeDiffStats
+              │     ├── diffExport.ts  Report & patch generators (.patch, .csv, .md, .json, .html)
               │     ├── highlight.ts   Prism highlighting + HTML export
               │     ├── sanitize.ts    escapeHtml, sanitizeCustomCss
               │     ├── storage.ts     safeSetItem
@@ -23,6 +24,8 @@ index.html          CSP, SEO/social meta, service worker registration
               │     └── types.ts       shared type re-exports
               └── components/
                     ├── EditorPane.tsx       Monaco wrapper
+                    ├── SplitDiffView.tsx    Side-by-side virtualized diff table & inline editing
+                    ├── UnifiedDiffView.tsx  Unified virtualized diff stream & inline editing
                     ├── StudioToolbar.tsx    toolbar controls, actions, fold context
                     ├── StatsBanner.tsx      diff stats summary bar & jump controls
                     ├── ShortcutsModal.tsx   keyboard reference
@@ -44,9 +47,10 @@ server.ts           Express + Socket.IO + Gemini proxy. NOT deployed to Pages.
 ```
 
 `App.tsx` coordinates high-level state, editor synchronization, and diff rendering.
-Extracted modals (`CloudSyncModal`, `GitConflictModal`, `HistoryModal`, `CustomizeModal`)
-and major chrome widgets (`StudioToolbar`, `StatsBanner`) have been lifted out into
-modular, testable components with accessible dialog attributes and focus trapping.
+Extracted modals (`CloudSyncModal`, `GitConflictModal`, `HistoryModal`, `CustomizeModal`),
+diff presentation components (`SplitDiffView`, `UnifiedDiffView`), and major chrome widgets
+(`StudioToolbar`, `StatsBanner`) have been lifted out into modular, testable components with
+accessible dialog attributes, focus trapping, in-diff search, and inline editing support.
 
 ### Why `lib/diffStats.ts` is separate from `diffWorker.ts`
 

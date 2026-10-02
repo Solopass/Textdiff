@@ -93,4 +93,36 @@ describe("inline diff editing", () => {
     const hasOriginal = finalCells.some((c) => c.textContent?.includes("item modified"));
     expect(hasOriginal).toBe(true);
   });
+
+  it("preserves CRLF line endings when editing inline", async () => {
+    localStorage.setItem("tds_origText", "first\r\nsecond\r\nthird");
+    localStorage.setItem("tds_modText", "first\r\nsecond_mod\r\nthird");
+
+    const user = userEvent.setup();
+    await openStudio(user);
+
+    await user.click(screen.getByText("RUN_DIFF"));
+
+    await waitFor(() => {
+      expect(document.getElementById("diff-report-container")).not.toBeNull();
+    });
+
+    const cells = screen.getAllByTitle("Double-click to edit line");
+    const targetCell = cells.find((c) => c.textContent?.includes("second_mod"));
+    expect(targetCell).toBeDefined();
+
+    await user.dblClick(targetCell!);
+    const input = document.querySelector("input[type='text']") as HTMLInputElement;
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input, { target: { value: "second_crlf_saved" } });
+    await user.click(screen.getByTitle("Save (Enter)"));
+
+    await waitFor(() => {
+      const saved = localStorage.getItem("tds_modText");
+      expect(saved).toContain("\r\n");
+      expect(saved).toBe("first\r\nsecond_crlf_saved\r\nthird");
+    });
+  });
 });
+

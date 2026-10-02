@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback, Suspense, lazy } from "react";
-import { TableVirtuoso, Virtuoso } from "react-virtuoso";
+import { SplitDiffView } from "./components/SplitDiffView";
+import { UnifiedDiffView } from "./components/UnifiedDiffView";
 
 // Both of these are optional panels that most sessions never open, and
 // MultiplayerMode drags in the whole socket.io client. Loading them lazily
@@ -89,6 +90,14 @@ import { computeDiffStats } from "./lib/diffStats";
 import LZString from "lz-string";
 
 import type { DiffRow, WordPart, HistoryItem } from "./lib/types";
+import {
+  generatePatchReport,
+  generateCsvReport,
+  generateMdReport,
+  downloadFile,
+  exportJsonReport,
+  exportHtmlReport as exportHtml,
+} from "./lib/diffExport";
 import { escapeHtml, sanitizeCustomCss } from "./lib/sanitize";
 import { safeSetItem } from "./lib/storage";
 import {
@@ -146,6 +155,8 @@ export default function App() {
     lineNum: number;
     text: string;
   } | null>(null);
+  const [showDiffSearch, setShowDiffSearch] = useState(false);
+  const [diffSearchQuery, setDiffSearchQuery] = useState("");
   const [uiFont, setUiFont] = useState<"sans" | "mono" | "serif" | "dyslexic">(
     "sans",
   );
@@ -683,6 +694,11 @@ export default function App() {
       // The palette handles its own Escape and stops propagation, so if it is
       // open we must not also close whatever is behind it.
       if (showPalette) return;
+      if (showDiffSearch) {
+        setShowDiffSearch(false);
+        setDiffSearchQuery("");
+        return;
+      }
       if (isFullscreen) return setIsFullscreen(false);
       if (showHelpModal) return setShowHelpModal(false);
       if (showHistoryModal) return setShowHistoryModal(false);
@@ -697,6 +713,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onEscape);
   }, [
     showPalette,
+    showDiffSearch,
     isFullscreen,
     showHelpModal,
     showHistoryModal,
@@ -717,6 +734,12 @@ export default function App() {
         setShowPalette((v) => !v);
         return;
       }
+      // Ctrl+F / Cmd+F opens in-diff search if diff is rendered
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f" && diffResult) {
+        e.preventDefault();
+        setShowDiffSearch(true);
+        return;
+      }
       // Ctrl+Enter or Cmd+Enter
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
@@ -734,7 +757,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [origText, modText, ignoreWs, ignoreCase, trimBlankLines, swapTexts]);
+  }, [origText, modText, ignoreWs, ignoreCase, trimBlankLines, swapTexts, diffResult]);
 
   // Computed stats
   const origStats = useMemo(() => getStatsString(origText), [origText]);
@@ -855,176 +878,6 @@ export default function App() {
       return;
     }
     loadFileInto(files[0], setTarget, setName);
-  };
-
-  /**
-   * Computes inline token-level differences between two strings.
-   * Used to highlight specific words/characters that changed within a modified line.
-   *
-   * @param {string} strA - The original string line.
-   * @param {string} strB - The modified string line.
-   * @returns {Object} An object containing partsA and partsB arrays with token-level diff classifications.
-   */
-  const computeTokenDiff = (strA: string, strB: string) => {
-    const tokensA = strA
-      .split(/([a-zA-Z0-9_]+|\s+|[^a-zA-Z0-9_\s])/)
-      .filter(Boolean);
-    const tokensB = strB
-      .split(/([a-zA-Z0-9_]+|\s+|[^a-zA-Z0-9_\s])/)
-      .filter(Boolean);
-
-    const m = tokensA.length;
-    const n = tokensB.length;
-    const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
-
-    for (let i = 0; i < m; i++) {
-      for (let j = 0; j < n; j++) {
-        if (tokensA[i] === tokensB[j]) {
-          dp[i + 1][j + 1] = dp[i][j] + 1;
-        } else {
-          dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-        }
-      }
-    }
-
-    const partsA: WordPart[] = [];
-    const partsB: WordPart[] = [];
-    let i = m,
-      j = n;
-
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && tokensA[i - 1] === tokensB[j - 1]) {
-        partsA.unshift({ text: tokensA[i - 1], type: "unchanged" });
-        partsB.unshift({ text: tokensB[j - 1], type: "unchanged" });
-        i--;
-        j--;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        partsB.unshift({ text: tokensB[j - 1], type: "add" });
-        j--;
-      } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-        partsA.unshift({ text: tokensA[i - 1], type: "del" });
-        i--;
-      }
-    }
-    return { partsA, partsB };
-  };
-
-  /**
-   * Computes the Longest Common Subsequence (LCS) to find differences between two arrays of lines.
-   *
-   * @param {string[]} aLines - Array of lines from the original text.
-   * @param {string[]} bLines - Array of lines from the modified text.
-   * @param {boolean} ignoreWhitespace - Whether to ignore leading/trailing whitespace during comparison.
-   * @param {boolean} ignoreCasing - Whether to ignore case differences during comparison.
-   * @returns {DiffRow[]} Array of row objects describing the diff line by line.
-   */
-  const computeLCS = (
-    aLines: string[],
-    bLines: string[],
-    ignoreWhitespace: boolean,
-    ignoreCasing: boolean,
-  ) => {
-    const normalize = (line: string) => {
-      let str = line;
-      if (ignoreWhitespace) str = str.trim().replace(/\s+/g, " ");
-      if (ignoreCasing) str = str.toLowerCase();
-      return str;
-    };
-
-    const m = aLines.length;
-    const n = bLines.length;
-
-    // Mirror of the worker's guard (see MAX_DP_CELLS in diffWorker.ts). This
-    // main-thread copy only runs where Worker is unavailable, but an
-    // unbounded (m+1)x(n+1) allocation would hang the tab outright here.
-    if ((m + 1) * (n + 1) > 12_000_000) {
-      throw new Error(
-        `Diff too large: ${m} x ${n} lines. Try comparing smaller files.`,
-      );
-    }
-
-    const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
-
-    for (let i = 0; i < m; i++) {
-      for (let j = 0; j < n; j++) {
-        if (normalize(aLines[i]) === normalize(bLines[j])) {
-          dp[i + 1][j + 1] = dp[i][j] + 1;
-        } else {
-          dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-        }
-      }
-    }
-
-    const diff: DiffRow[] = [];
-    let i = m,
-      j = n;
-
-    // Backtracking with fixed syntax (removed |---|j > 0 error)
-    while (i > 0 || j > 0) {
-      if (
-        i > 0 &&
-        j > 0 &&
-        normalize(aLines[i - 1]) === normalize(bLines[j - 1])
-      ) {
-        diff.unshift({
-          type: "unchanged",
-          lineA: aLines[i - 1],
-          lineB: bLines[j - 1],
-          lineNumA: i,
-          lineNumB: j,
-        });
-        i--;
-        j--;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        diff.unshift({
-          type: "add",
-          lineA: "",
-          lineB: bLines[j - 1],
-          lineNumA: null,
-          lineNumB: j,
-        });
-        j--;
-      } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-        diff.unshift({
-          type: "del",
-          lineA: aLines[i - 1],
-          lineB: "",
-          lineNumA: i,
-          lineNumB: null,
-        });
-        i--;
-      }
-    }
-
-    for (let k = 0; k < diff.length; k++) {
-      if (
-        diff[k].type === "del" &&
-        k + 1 < diff.length &&
-        diff[k + 1].type === "add"
-      ) {
-        const { partsA, partsB } = computeTokenDiff(
-          diff[k].lineA,
-          diff[k + 1].lineB,
-        );
-        diff[k].partsA = partsA;
-        diff[k + 1].partsB = partsB;
-        k++;
-      } else if (
-        diff[k].type === "add" &&
-        k + 1 < diff.length &&
-        diff[k + 1].type === "del"
-      ) {
-        const { partsA, partsB } = computeTokenDiff(
-          diff[k + 1].lineA,
-          diff[k].lineB,
-        );
-        diff[k + 1].partsA = partsA;
-        diff[k].partsB = partsB;
-        k++;
-      }
-    }
-
-    return diff;
   };
 
   const [isSharing, setIsSharing] = useState(false);
@@ -1151,59 +1004,12 @@ export default function App() {
         caseInsensitive,
         trimBlanks,
       });
-    } else {
-      // Fallback for environments without Worker support (e.g. jsdom in tests).
-      let aLines = orig ? orig.split("\n") : [];
-      let bLines = mod ? mod.split("\n") : [];
-
-      if (trimBlanks) {
-        aLines = aLines.filter((line) => line.trim() !== "");
-        bLines = bLines.filter((line) => line.trim() !== "");
-      }
-
-      try {
-        const diff = computeLCS(aLines, bLines, ws, caseInsensitive);
-        setDiffError(null);
-        setDiffResult(diff);
-      } catch (err: any) {
-        setDiffError(err?.message || "The diff engine failed on this input.");
-        setDiffResult(null);
-      }
     }
   };
 
   const exportHtmlReport = () => {
     if (!diffResult) return;
-    const element = document.getElementById("diff-report-container");
-    if (!element) return;
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Diff Report</title>
-        <style>
-          body { background-color: #020617; color: #E2E8F0; font-family: monospace; }
-          .diff-container { padding: 2rem; max-width: 1200px; margin: 0 auto; }
-          .add { background-color: rgba(6, 78, 59, 0.3); color: #6EE7B7; }
-          .del { background-color: rgba(69, 10, 10, 0.3); color: #FCA5A5; }
-        </style>
-      </head>
-      <body>
-        <div class="diff-container">
-          ${element.innerHTML}
-        </div>
-      </body>
-      </html>
-    `;
-    const dataStr =
-      "data:text/html;charset=utf-8," + encodeURIComponent(htmlContent);
-    const downloadAnchorNode = document.createElement("a");
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "diff_report.html");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    exportHtml(document.getElementById("diff-report-container"));
   };
 
   const exportImageReport = async () => {
@@ -1285,15 +1091,7 @@ export default function App() {
 
   const exportRawDiff = () => {
     if (!diffResult) return;
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(diffResult, null, 2));
-    const downloadAnchorNode = document.createElement("a");
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "textdiff_payload.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    exportJsonReport(diffResult);
   };
 
   // Stats calculation
@@ -1345,6 +1143,17 @@ export default function App() {
     }
     return map;
   }, [diffResult]);
+
+  const searchMatchCount = useMemo(() => {
+    if (!diffSearchQuery.trim() || !diffResult) return 0;
+    const q = diffSearchQuery.toLowerCase();
+    let count = 0;
+    for (const row of diffResult) {
+      if (row.lineA && row.lineA.toLowerCase().includes(q)) count++;
+      if (row.lineB && row.lineB !== row.lineA && row.lineB.toLowerCase().includes(q)) count++;
+    }
+    return count;
+  }, [diffSearchQuery, diffResult]);
 
   const visibleDiffResult = useMemo(() => {
     if (!diffResult) return null;
@@ -1422,20 +1231,22 @@ export default function App() {
     if (!editingCell) return;
     const { side, lineNum, text } = editingCell;
     if (side === "orig") {
-      const lines = origText.split("\n");
+      const eol = origText.includes("\r\n") ? "\r\n" : "\n";
+      const lines = origText.split(/\r?\n/);
       if (lineNum >= 1 && lineNum <= lines.length) {
         lines[lineNum - 1] = text;
-        const newOrig = lines.join("\n");
+        const newOrig = lines.join(eol);
         setOrigText(newOrig);
         if (diffResult) {
           runDiff(newOrig, modText, ignoreWs, ignoreCase, trimBlankLines);
         }
       }
     } else {
-      const lines = modText.split("\n");
+      const eol = modText.includes("\r\n") ? "\r\n" : "\n";
+      const lines = modText.split(/\r?\n/);
       if (lineNum >= 1 && lineNum <= lines.length) {
         lines[lineNum - 1] = text;
-        const newMod = lines.join("\n");
+        const newMod = lines.join(eol);
         setModText(newMod);
         if (diffResult) {
           runDiff(origText, newMod, ignoreWs, ignoreCase, trimBlankLines);
@@ -1461,91 +1272,17 @@ Date: ${new Date().toLocaleString()}
 
   const exportPatchReport = () => {
     if (!diffResult) return;
-    let patchStr = `--- Original\n+++ Modified\n`;
-    diffResult.forEach((row) => {
-      if (row.type === "unchanged") {
-        patchStr += ` ${row.lineA}\n`;
-      } else if (row.type === "del") {
-        patchStr += `-${row.lineA}\n`;
-      } else if (row.type === "add") {
-        patchStr += `+${row.lineB}\n`;
-      }
-    });
-    const blob = new Blob([patchStr], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "diff.patch";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadFile("diff.patch", generatePatchReport(diffResult), "text/plain");
   };
 
   const exportCsvReport = () => {
     if (!diffResult) return;
-    let csvStr = `Type,Original Line,Modified Line,Original Content,Modified Content\n`;
-
-    const escapeCsv = (str: string) => {
-      if (!str) return '""';
-      return `"${str.replace(/"/g, '""')}"`;
-    };
-
-    diffResult.forEach((row) => {
-      const type = row.type;
-      const lineA = row.lineNumA || "";
-      const lineB = row.lineNumB || "";
-      const contentA = escapeCsv(row.lineA || "");
-      const contentB = escapeCsv(row.lineB || "");
-      csvStr += `${type},${lineA},${lineB},${contentA},${contentB}\n`;
-    });
-
-    const blob = new Blob([csvStr], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "diff.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadFile("diff.csv", generateCsvReport(diffResult), "text/csv");
   };
 
   const exportMdReport = () => {
     if (!diffResult) return;
-    let mdStr = `# Diff Report\n\n`;
-    mdStr += `**Date:** ${new Date().toLocaleString()}\n\n`;
-
-    if (stats) {
-      mdStr += `## Summary\n`;
-      mdStr += `- **Similarity:** ${stats.similarity}%\n`;
-      mdStr += `- **Additions:** +${stats.addCount} lines\n`;
-      mdStr += `- **Deletions:** -${stats.delCount} lines\n`;
-      mdStr += `- **Unchanged:** ${stats.unchangedCount} lines\n\n`;
-    }
-
-    mdStr += `## Changes\n\n`;
-    mdStr += `\`\`\`diff\n`;
-    diffResult.forEach((row) => {
-      if (row.type === "unchanged") {
-        mdStr += `  ${row.lineA}\n`;
-      } else if (row.type === "del") {
-        mdStr += `- ${row.lineA}\n`;
-      } else if (row.type === "add") {
-        mdStr += `+ ${row.lineB}\n`;
-      }
-    });
-    mdStr += `\`\`\`\n`;
-
-    const blob = new Blob([mdStr], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "diff.md";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadFile("diff.md", generateMdReport(diffResult, stats), "text/markdown");
   };
 
   // Every palette entry maps to an action that already exists elsewhere in the
@@ -1601,6 +1338,15 @@ Date: ${new Date().toLocaleString()}
       group: "Navigate",
       disabled: !diffResult,
       run: scrollToPrevDiff,
+    },
+    {
+      id: "search-diff",
+      title: "Find in diff results",
+      group: "Navigate",
+      shortcut: "Ctrl+F",
+      keywords: "find search query text filter",
+      disabled: !diffResult,
+      run: () => setShowDiffSearch(true),
     },
     {
       id: "view-split",
@@ -2386,6 +2132,16 @@ Date: ${new Date().toLocaleString()}
                 </div>
                 <div className="flex items-center gap-2">
                   {diffResult && (
+                    <button
+                      onClick={() => setShowDiffSearch((v) => !v)}
+                      className={`p-1 rounded transition-colors ${showDiffSearch ? "bg-[#34D399]/20 text-[#34D399]" : "hover:bg-[#334155] text-[#94A3B8]"}`}
+                      title="Search in Diff (Ctrl+F)"
+                      aria-label="Search in Diff"
+                    >
+                      <Search className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                  )}
+                  {diffResult && (
                     <div className="flex border-[#334155] pr-2 mr-2 border-r gap-1">
                       <button
                         onClick={scrollToPrevDiff}
@@ -2416,607 +2172,79 @@ Date: ${new Date().toLocaleString()}
                 </div>
               </div>
 
+              {showDiffSearch && (
+                <div className="bg-[#0B132B] px-4 py-2 border-b border-[#334155] flex items-center gap-3">
+                  <Search className="w-4 h-4 text-[#94A3B8]" />
+                  <input
+                    type="text"
+                    value={diffSearchQuery}
+                    onChange={(e) => setDiffSearchQuery(e.target.value)}
+                    placeholder="Find in diff..."
+                    autoFocus
+                    className="flex-1 bg-transparent text-xs text-white placeholder-[#64748B] outline-none font-mono"
+                  />
+                  {diffSearchQuery && (
+                    <span className="text-[11px] text-[#94A3B8] font-mono">
+                      {searchMatchCount} match{searchMatchCount === 1 ? "" : "es"}
+                    </span>
+                  )}
+                  {diffSearchQuery && (
+                    <button
+                      onClick={() => setDiffSearchQuery("")}
+                      className="text-[#94A3B8] hover:text-white p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setShowDiffSearch(false);
+                      setDiffSearchQuery("");
+                    }}
+                    className="text-xs text-[#94A3B8] hover:text-white ml-2 px-1.5 py-0.5 bg-[#1E293B] rounded border border-[#334155]"
+                  >
+                    Esc
+                  </button>
+                </div>
+              )}
+
               <div className="bg-black overflow-x-auto font-mono text-[11px] leading-relaxed p-4">
                 {effectiveViewMode === "split" ? (
-                  <TableVirtuoso
-                    data={visibleDiffResult}
-                    initialItemCount={visibleDiffResult.length}
-                    useWindowScroll
-                    className="w-full border-collapse table-fixed min-w-[600px]"
-                    components={{
-                      Table: ({ style, ...props }) => (
-                        <table
-                          {...props}
-                          style={{
-                            ...style,
-                            width: "100%",
-                            tableLayout: "fixed",
-                          }}
-                          className="border-collapse min-w-[600px]"
-                        />
-                      ),
-                      TableBody: React.forwardRef((props, ref) => (
-                        <tbody {...props} ref={ref} />
-                      )),
-                      TableRow: ({ item, ...props }) => (
-                        <tr
-                          {...props}
-                          className={`border-b border-[#1E293B]/50 last:border-0 ${item.type === "add" || item.type === "del" ? "diff-row-changed" : ""}`}
-                        />
-                      ),
-                    }}
-                    itemContent={(idx, item) => (
-                      <React.Fragment>
-                        {item.type === "folded" && (
-                          <td
-                            colSpan={showLineNums ? 4 : 2}
-                            className="py-2 text-center text-[#475569] bg-[#0F172A] border-y border-[#334155]"
-                          >
-                            <div className="flex items-center justify-center gap-2">
-                              <div className="h-px bg-[#334155] flex-1"></div>
-                              <span className="text-[10px] uppercase font-bold tracking-widest">
-                                Unchanged Lines Folded
-                              </span>
-                              <div className="h-px bg-[#334155] flex-1"></div>
-                            </div>
-                          </td>
-                        )}
-                        {item.type === "unchanged" && (
-                          <>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#64748B] bg-[#111827] border-r border-[#334155] select-none pr-2 py-0.5">
-                                {item.lineNumA}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8] cursor-text`}
-                              onDoubleClick={() =>
-                                item.lineNumA !== null &&
-                                setEditingCell({
-                                  side: "orig",
-                                  lineNum: item.lineNumA,
-                                  text: item.lineA,
-                                })
-                              }
-                              title="Double-click to edit line"
-                            >
-                              {editingCell &&
-                              editingCell.side === "orig" &&
-                              editingCell.lineNum === item.lineNumA ? (
-                                <div className="flex items-center gap-1.5 w-full py-0.5">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    ref={(el) => el?.select()}
-                                    value={editingCell.text}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev ? { ...prev, text: e.target.value } : null,
-                                      )
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        commitInlineEdit();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={commitInlineEdit}
-                                    title="Save (Enter)"
-                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingCell(null)}
-                                    title="Cancel (Esc)"
-                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <span
-                                  dangerouslySetInnerHTML={{
-                                    __html: highlightCode(
-                                      item.lineA,
-                                      syntaxTheme,
-                                      language,
-                                    ),
-                                  }}
-                                />
-                              )}
-                            </td>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#64748B] bg-[#111827] border-r border-l border-[#334155] select-none pr-2 py-0.5">
-                                {item.lineNumB}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8] cursor-text`}
-                              onDoubleClick={() =>
-                                item.lineNumB !== null &&
-                                setEditingCell({
-                                  side: "mod",
-                                  lineNum: item.lineNumB,
-                                  text: item.lineB,
-                                })
-                              }
-                              title="Double-click to edit line"
-                            >
-                              {editingCell &&
-                              editingCell.side === "mod" &&
-                              editingCell.lineNum === item.lineNumB ? (
-                                <div className="flex items-center gap-1.5 w-full py-0.5">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    ref={(el) => el?.select()}
-                                    value={editingCell.text}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev ? { ...prev, text: e.target.value } : null,
-                                      )
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        commitInlineEdit();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={commitInlineEdit}
-                                    title="Save (Enter)"
-                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingCell(null)}
-                                    title="Cancel (Esc)"
-                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <span
-                                  dangerouslySetInnerHTML={{
-                                    __html: highlightCode(
-                                      item.lineB,
-                                      syntaxTheme,
-                                      language,
-                                    ),
-                                  }}
-                                />
-                              )}
-                            </td>
-                          </>
-                        )}
-                        {item.type === "del" && (
-                          <>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#EF4444] bg-[#450a0a]/30 border-r border-[#EF4444]/30 select-none pr-2 py-0.5">
-                                {item.lineNumA}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#450a0a]/20 text-[#FCA5A5] border-r border-[#334155]/30 cursor-text`}
-                              onDoubleClick={() =>
-                                item.lineNumA !== null &&
-                                setEditingCell({
-                                  side: "orig",
-                                  lineNum: item.lineNumA,
-                                  text: item.lineA,
-                                })
-                              }
-                              title="Double-click to edit line"
-                            >
-                              {editingCell &&
-                              editingCell.side === "orig" &&
-                              editingCell.lineNum === item.lineNumA ? (
-                                <div className="flex items-center gap-1.5 w-full py-0.5">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    ref={(el) => el?.select()}
-                                    value={editingCell.text}
-                                    onChange={(e) =>
-                                      setEditingCell({
-                                        ...editingCell,
-                                        text: e.target.value,
-                                      })
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        commitInlineEdit();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={commitInlineEdit}
-                                    title="Save (Enter)"
-                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingCell(null)}
-                                    title="Cancel (Esc)"
-                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <>
-                                  {item.moved === "from" && (
-                                    <span
-                                      className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
-                                      title={`Moved elsewhere (Block #${item.movedBlockId})`}
-                                    >
-                                      MOVED #{item.movedBlockId} ↷
-                                    </span>
-                                  )}
-                                  {item.partsA ? (
-                                    item.partsA.map((part, i) => (
-                                      <span
-                                        key={i}
-                                        className={
-                                          part.type === "del"
-                                            ? "bg-[#EF4444]/40 text-white rounded-[2px]"
-                                            : ""
-                                        }
-                                        dangerouslySetInnerHTML={{
-                                          __html: highlightCode(
-                                            part.text,
-                                            syntaxTheme,
-                                            language,
-                                          ),
-                                        }}
-                                      />
-                                    ))
-                                  ) : (
-                                    <span
-                                      dangerouslySetInnerHTML={{
-                                        __html: highlightCode(
-                                          item.lineA,
-                                          syntaxTheme,
-                                          language,
-                                        ),
-                                      }}
-                                    />
-                                  )}
-                                </>
-                              )}
-                            </td>
-                            {showLineNums && (
-                              <td className="w-10 bg-[#111827] border-r border-l border-[#334155] select-none"></td>
-                            )}
-                            <td className="p-0.5 px-3"></td>
-                          </>
-                        )}
-                        {item.type === "add" && (
-                          <>
-                            {showLineNums && (
-                              <td className="w-10 bg-[#111827] border-r border-[#334155] select-none"></td>
-                            )}
-                            <td className="p-0.5 px-3 border-r border-[#334155]/30"></td>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#10B981] bg-[#064E3B]/30 border-r border-[#10B981]/30 border-l border-[#334155] select-none pr-2 py-0.5">
-                                {item.lineNumB}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#064E3B]/20 text-[#6EE7B7] cursor-text`}
-                              onDoubleClick={() =>
-                                item.lineNumB !== null &&
-                                setEditingCell({
-                                  side: "mod",
-                                  lineNum: item.lineNumB,
-                                  text: item.lineB,
-                                })
-                              }
-                              title="Double-click to edit line"
-                            >
-                              {editingCell &&
-                              editingCell.side === "mod" &&
-                              editingCell.lineNum === item.lineNumB ? (
-                                <div className="flex items-center gap-1.5 w-full py-0.5">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    ref={(el) => el?.select()}
-                                    value={editingCell.text}
-                                    onChange={(e) =>
-                                      setEditingCell({
-                                        ...editingCell,
-                                        text: e.target.value,
-                                      })
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        commitInlineEdit();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={commitInlineEdit}
-                                    title="Save (Enter)"
-                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingCell(null)}
-                                    title="Cancel (Esc)"
-                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <>
-                                  {item.moved === "to" && (
-                                    <span
-                                      className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
-                                      title={`Moved from elsewhere (Block #${item.movedBlockId})`}
-                                    >
-                                      MOVED #{item.movedBlockId} ↶
-                                    </span>
-                                  )}
-                                  {item.partsB ? (
-                                    item.partsB.map((part, i) => (
-                                      <span
-                                        key={i}
-                                        className={
-                                          part.type === "add"
-                                            ? "bg-[#10B981]/40 text-white rounded-[2px]"
-                                            : ""
-                                        }
-                                        dangerouslySetInnerHTML={{
-                                          __html: highlightCode(
-                                            part.text,
-                                            syntaxTheme,
-                                            language,
-                                          ),
-                                        }}
-                                      />
-                                    ))
-                                  ) : (
-                                    <span
-                                      dangerouslySetInnerHTML={{
-                                        __html: highlightCode(
-                                          item.lineB,
-                                          syntaxTheme,
-                                          language,
-                                        ),
-                                      }}
-                                    />
-                                  )}
-                                </>
-                              )}
-                            </td>
-                          </>
-                        )}
-                      </React.Fragment>
-                    )}
+                  <SplitDiffView
+                    diffResult={visibleDiffResult || []}
+                    showLineNums={showLineNums}
+                    wordWrap={wordWrap}
+                    syntaxTheme={syntaxTheme}
+                    language={language}
+                    searchQuery={showDiffSearch ? diffSearchQuery : undefined}
+                    editingCell={editingCell}
+                    onStartEdit={(side, lineNum, text) =>
+                      setEditingCell({ side, lineNum, text })
+                    }
+                    onUpdateEditText={(text) =>
+                      setEditingCell((prev) => (prev ? { ...prev, text } : null))
+                    }
+                    onCommitEdit={commitInlineEdit}
+                    onCancelEdit={() => setEditingCell(null)}
                   />
                 ) : (
-                  <Virtuoso
-                    data={visibleDiffResult}
-                    initialItemCount={visibleDiffResult.length}
-                    useWindowScroll
-                    className="w-full flex flex-col min-w-[600px] border border-[#1E293B]"
-                    itemContent={(idx, item) =>
-                      item.type === "folded" ? (
-                        <div
-                          key={idx}
-                          className="flex w-full py-2 text-center text-[#475569] bg-[#0F172A] border-y border-[#334155]"
-                        >
-                          <div className="flex items-center justify-center gap-2 w-full px-4">
-                            <div className="h-px bg-[#334155] flex-1"></div>
-                            <span className="text-[10px] uppercase font-bold tracking-widest">
-                              Unchanged Lines Folded
-                            </span>
-                            <div className="h-px bg-[#334155] flex-1"></div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          key={idx}
-                          className={`flex border-b border-[#1E293B]/50 last:border-0 hover:bg-[#111827] transition-colors ${item.type === "add" || item.type === "del" ? "diff-row-changed" : ""} ${
-                            item.type === "del"
-                              ? "bg-[#450a0a]/20 text-[#FCA5A5]"
-                              : item.type === "add"
-                                ? "bg-[#064E3B]/20 text-[#6EE7B7]"
-                                : "text-[#94A3B8]"
-                          }`}
-                        >
-                          {showLineNums && (
-                            <div className="flex w-16 flex-shrink-0 bg-[#111827] text-[#64748B] border-r border-[#334155] select-none text-[10px]">
-                              <div className="w-1/2 text-right pr-1.5 py-0.5 border-r border-[#334155]/50">
-                                {item.lineNumA}
-                              </div>
-                              <div className="w-1/2 text-right pr-1.5 py-0.5">
-                                {item.lineNumB}
-                              </div>
-                            </div>
-                          )}
-                          <div
-                            className={`w-8 flex-shrink-0 text-center font-bold select-none border-r ${
-                              item.type === "del"
-                                ? "border-[#EF4444]/30 bg-[#450a0a]/30 text-[#EF4444]"
-                                : item.type === "add"
-                                  ? "border-[#10B981]/30 bg-[#064E3B]/30 text-[#10B981]"
-                                  : "border-[#334155] bg-[#111827] text-[#64748B]"
-                            } py-0.5`}
-                          >
-                            {item.type === "del"
-                              ? "-"
-                              : item.type === "add"
-                                ? "+"
-                                : " "}
-                          </div>
-                          <div
-                            className={`flex-1 px-3 py-0.5 ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} cursor-text`}
-                            onDoubleClick={() => {
-                              if (item.type === "del" && item.lineNumA !== null) {
-                                setEditingCell({
-                                  side: "orig",
-                                  lineNum: item.lineNumA,
-                                  text: item.lineA,
-                                });
-                              } else if (item.type === "add" && item.lineNumB !== null) {
-                                setEditingCell({
-                                  side: "mod",
-                                  lineNum: item.lineNumB,
-                                  text: item.lineB,
-                                });
-                              } else if (item.type === "unchanged" && item.lineNumB !== null) {
-                                setEditingCell({
-                                  side: "mod",
-                                  lineNum: item.lineNumB,
-                                  text: item.lineB,
-                                });
-                              }
-                            }}
-                            title="Double-click to edit line"
-                          >
-                            {editingCell &&
-                            ((editingCell.side === "orig" && editingCell.lineNum === item.lineNumA) ||
-                             (editingCell.side === "mod" && editingCell.lineNum === item.lineNumB)) ? (
-                              <div className="flex items-center gap-1.5 w-full py-0.5">
-                                <input
-                                  type="text"
-                                  autoFocus
-                                  ref={(el) => el?.select()}
-                                  value={editingCell.text}
-                                  onChange={(e) =>
-                                    setEditingCell((prev) =>
-                                      prev ? { ...prev, text: e.target.value } : null,
-                                    )
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      commitInlineEdit();
-                                    } else if (e.key === "Escape") {
-                                      setEditingCell(null);
-                                    }
-                                  }}
-                                  className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={commitInlineEdit}
-                                  title="Save (Enter)"
-                                  className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
-                                >
-                                  ✓
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingCell(null)}
-                                  title="Cancel (Esc)"
-                                  className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                {item.moved === "from" && (
-                                  <span
-                                    className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
-                                    title={`Moved elsewhere (Block #${item.movedBlockId})`}
-                                  >
-                                    MOVED #{item.movedBlockId} ↷
-                                  </span>
-                                )}
-                                {item.moved === "to" && (
-                                  <span
-                                    className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
-                                    title={`Moved from elsewhere (Block #${item.movedBlockId})`}
-                                  >
-                                    MOVED #{item.movedBlockId} ↶
-                                  </span>
-                                )}
-                                {item.type === "add" ? (
-                                  item.partsB ? (
-                                    item.partsB.map((part, i) => (
-                                      <span
-                                        key={i}
-                                        className={
-                                          part.type === "add"
-                                            ? "bg-[#10B981]/40 text-white rounded-[2px]"
-                                            : ""
-                                        }
-                                      >
-                                        {part.text}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    item.lineB
-                                  )
-                                ) : item.type === "del" ? (
-                                  item.partsA ? (
-                                    item.partsA.map((part, i) => (
-                                      <span
-                                        key={i}
-                                        className={
-                                          part.type === "del"
-                                            ? "bg-[#EF4444]/40 text-white rounded-[2px]"
-                                            : ""
-                                        }
-                                      >
-                                        {part.text}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    item.lineA
-                                  )
-                                ) : (
-                                  <span
-                                    dangerouslySetInnerHTML={{
-                                      __html: highlightCode(
-                                        item.lineA,
-                                        syntaxTheme,
-                                        language,
-                                      ),
-                                    }}
-                                  />
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )
+                  <UnifiedDiffView
+                    diffResult={visibleDiffResult || []}
+                    showLineNums={showLineNums}
+                    wordWrap={wordWrap}
+                    syntaxTheme={syntaxTheme}
+                    language={language}
+                    searchQuery={showDiffSearch ? diffSearchQuery : undefined}
+                    editingCell={editingCell}
+                    onStartEdit={(side, lineNum, text) =>
+                      setEditingCell({ side, lineNum, text })
                     }
+                    onUpdateEditText={(text) =>
+                      setEditingCell((prev) => (prev ? { ...prev, text } : null))
+                    }
+                    onCommitEdit={commitInlineEdit}
+                    onCancelEdit={() => setEditingCell(null)}
                   />
                 )}
               </div>

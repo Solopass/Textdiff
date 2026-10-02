@@ -303,3 +303,4 @@ describe("detectMovedBlocks", () => {
     expect(blockIds.size).toBe(2);
   });
 });
+
