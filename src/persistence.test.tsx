@@ -57,6 +57,7 @@ describe("settings persistence", () => {
       "trimBlankLines",
       "showLineNums",
       "foldUnchanged",
+      "foldContext",
       "wordWrap",
       "syntaxTheme",
       "language",

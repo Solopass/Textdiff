@@ -121,6 +121,7 @@ export default function App() {
   const [trimBlankLines, setTrimBlankLines] = useState(false);
   const [showLineNums, setShowLineNums] = useState(true);
   const [foldUnchanged, setFoldUnchanged] = useState(false);
+  const [foldContext, setFoldContext] = useState<number>(3);
   const [wordWrap, setWordWrap] = useState(false);
   const [syntaxTheme, setSyntaxTheme] = useState<
     | "dark"
@@ -549,6 +550,8 @@ export default function App() {
             setShowLineNums(config.showLineNums);
           if (config.foldUnchanged !== undefined)
             setFoldUnchanged(config.foldUnchanged);
+          if (config.foldContext !== undefined)
+            setFoldContext(config.foldContext);
           if (config.wordWrap !== undefined) setWordWrap(config.wordWrap);
           if (config.syntaxTheme !== undefined)
             setSyntaxTheme(config.syntaxTheme);
@@ -622,6 +625,7 @@ export default function App() {
           trimBlankLines,
           showLineNums,
           foldUnchanged,
+          foldContext,
           wordWrap,
           syntaxTheme,
           language,
@@ -650,6 +654,7 @@ export default function App() {
     trimBlankLines,
     showLineNums,
     foldUnchanged,
+    foldContext,
     wordWrap,
     syntaxTheme,
     language,
@@ -1340,7 +1345,7 @@ export default function App() {
     if (!diffResult) return null;
     if (!foldUnchanged) return diffResult;
 
-    const contextLines = 3;
+    const contextLines = foldContext;
     const result: DiffRow[] = [];
     const showMask = new Array(diffResult.length).fill(false);
 
@@ -1375,7 +1380,7 @@ export default function App() {
       }
     }
     return result;
-  }, [diffResult, foldUnchanged]);
+  }, [diffResult, foldUnchanged, foldContext]);
 
   const scrollToNextDiff = () => {
     const elements = document.querySelectorAll(".diff-row-changed");
@@ -1606,6 +1611,46 @@ Date: ${new Date().toLocaleString()}
       run: () => setFoldUnchanged(!foldUnchanged),
     },
     {
+      id: "fold-context-1",
+      title: "Fold Context: 1 line",
+      group: "View",
+      keywords: "context lines collapse 1",
+      run: () => {
+        setFoldContext(1);
+        setFoldUnchanged(true);
+      },
+    },
+    {
+      id: "fold-context-3",
+      title: "Fold Context: 3 lines (default)",
+      group: "View",
+      keywords: "context lines collapse 3",
+      run: () => {
+        setFoldContext(3);
+        setFoldUnchanged(true);
+      },
+    },
+    {
+      id: "fold-context-5",
+      title: "Fold Context: 5 lines",
+      group: "View",
+      keywords: "context lines collapse 5",
+      run: () => {
+        setFoldContext(5);
+        setFoldUnchanged(true);
+      },
+    },
+    {
+      id: "fold-context-10",
+      title: "Fold Context: 10 lines",
+      group: "View",
+      keywords: "context lines collapse 10",
+      run: () => {
+        setFoldContext(10);
+        setFoldUnchanged(true);
+      },
+    },
+    {
       id: "toggle-ws",
       title: ignoreWs ? "Stop ignoring whitespace" : "Ignore whitespace",
       group: "Filters",
@@ -1819,6 +1864,8 @@ Date: ${new Date().toLocaleString()}
           }}
           foldUnchanged={foldUnchanged}
           setFoldUnchanged={setFoldUnchanged}
+          foldContext={foldContext}
+          setFoldContext={setFoldContext}
           showLineNums={showLineNums}
           setShowLineNums={setShowLineNums}
           wordWrap={wordWrap}

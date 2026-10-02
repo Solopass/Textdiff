@@ -35,6 +35,8 @@ interface Props {
   onToggleTrimBlankLines: (checked: boolean) => void;
   foldUnchanged: boolean;
   setFoldUnchanged: (v: boolean) => void;
+  foldContext: number;
+  setFoldContext: (v: number) => void;
   showLineNums: boolean;
   setShowLineNums: (v: boolean) => void;
   wordWrap: boolean;
@@ -77,6 +79,8 @@ export const StudioToolbar: React.FC<Props> = ({
   onToggleTrimBlankLines,
   foldUnchanged,
   setFoldUnchanged,
+  foldContext,
+  setFoldContext,
   showLineNums,
   setShowLineNums,
   wordWrap,
@@ -195,6 +199,19 @@ export const StudioToolbar: React.FC<Props> = ({
           )}
           FOLD_UNCHANGED
         </label>
+        {foldUnchanged && (
+          <select
+            value={foldContext}
+            onChange={(e) => setFoldContext(Number(e.target.value))}
+            aria-label="Fold context lines"
+            className="bg-[#020617] border border-[#334155] text-xs font-mono text-[#34D399] rounded px-1.5 py-0.5 focus:border-[#34D399] outline-none"
+          >
+            <option value={1}>1 line</option>
+            <option value={3}>3 lines</option>
+            <option value={5}>5 lines</option>
+            <option value={10}>10 lines</option>
+          </select>
+        )}
         <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors ml-2 border-l border-[#334155] pl-4">
           <input
             type="checkbox"
