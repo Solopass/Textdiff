@@ -82,7 +82,10 @@ window.addEventListener('error', e => errors.push('window.error: ' + e.message))
 const origErr = console.error;
 console.error = (...a) => { errors.push('console.error: ' + a.join(' ').slice(0,200)); };
 
-const entry = readdirSync(new URL('../dist/assets/', import.meta.url)).find(f => /^index-.*\.js$/.test(f));
+const match = html.match(/src=["'](?:\.\/)?assets\/(index-[^"']+\.js)["']/);
+const entry = match
+  ? match[1]
+  : readdirSync(new URL('../dist/assets/', import.meta.url)).find(f => /^index-.*\.js$/.test(f));
 console.log('booting', entry);
 
 try {

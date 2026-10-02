@@ -4,28 +4,38 @@
  * Purely presentational — it depends on nothing but its own open/close state,
  * which is why it was the safest ~110 lines to lift out of App.tsx.
  */
+import React, { useRef } from "react";
 import { Keyboard, X } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 type Props = {
   onClose: () => void;
 };
 
 export function ShortcutsModal({ onClose }: Props) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, { active: true, onClose });
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Keyboard shortcuts"
+      aria-labelledby="shortcuts-modal-title"
     >
-      <div className="bg-[#020617] border border-[#334155] max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-[#020617] border border-[#334155] max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+      >
         <div className="flex justify-between items-center p-4 border-b border-[#334155] bg-[#1E293B]">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <h3 id="shortcuts-modal-title" className="text-sm font-bold text-white flex items-center gap-2">
             <Keyboard className="w-4 h-4 text-[#34D399]" />
             Keyboard Shortcuts
           </h3>
           <button
             onClick={() => onClose()}
+            aria-label="Close keyboard shortcuts"
             className="text-[#94A3B8] hover:text-white transition-colors"
           >
             <X className="w-5 h-5" />

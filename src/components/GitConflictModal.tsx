@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useRef } from "react";
 import { GitMerge, X, Sparkles } from "lucide-react";
 import { SERVER_FEATURES_ENABLED, COMING_SOON_TITLE } from "../lib/constants";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export interface GitConflictParseResult {
   orig: string;
@@ -69,6 +70,9 @@ export const GitConflictModal: React.FC<Props> = ({
   onResolveAI,
   isResolvingAI,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, { active: isOpen, onClose });
+
   if (!isOpen) return null;
 
   const handleManualParse = () => {
@@ -81,11 +85,15 @@ export const GitConflictModal: React.FC<Props> = ({
       className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Git conflict resolver"
+      aria-labelledby="git-conflict-modal-title"
     >
-      <div className="bg-[#020617] border border-[#334155] rounded-xl w-full max-w-3xl flex flex-col max-h-[90vh] shadow-2xl animate-in zoom-in-95 duration-200">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-[#020617] border border-[#334155] rounded-xl w-full max-w-3xl flex flex-col max-h-[90vh] shadow-2xl animate-in zoom-in-95 duration-200"
+      >
         <div className="p-4 border-b border-[#334155] flex justify-between items-center bg-[#0F172A] rounded-t-xl">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <h3 id="git-conflict-modal-title" className="text-lg font-bold text-white flex items-center gap-2">
             <GitMerge className="w-5 h-5 text-[#34D399]" />
             Git Conflict Resolver
           </h3>

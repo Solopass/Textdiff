@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useRef } from "react";
 import { History, X } from "lucide-react";
 import type { HistoryItem } from "../lib/types";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface Props {
   isOpen: boolean;
@@ -15,6 +16,9 @@ export const HistoryModal: React.FC<Props> = ({
   history,
   onRestore,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, { active: isOpen, onClose });
+
   if (!isOpen) return null;
 
   return (
@@ -22,11 +26,15 @@ export const HistoryModal: React.FC<Props> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Diff history"
+      aria-labelledby="history-modal-title"
     >
-      <div className="bg-[#020617] border border-[#334155] max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-[#020617] border border-[#334155] max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+      >
         <div className="flex justify-between items-center p-4 border-b border-[#334155] bg-[#1E293B]">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <h3 id="history-modal-title" className="text-sm font-bold text-white flex items-center gap-2">
             <History className="w-4 h-4 text-[#34D399]" />
             Diff History
           </h3>

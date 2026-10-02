@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Palette,
   Layout,
@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { safeSetItem } from "../lib/storage";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export interface CustomThemeColors {
   bg: string;
@@ -84,6 +85,9 @@ export const CustomizeModal: React.FC<Props> = ({
   setCustomTheme,
   playSound,
 }) => {
+  const drawerRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(drawerRef, { active: isOpen, onClose });
+
   const [lockedLayout, setLockedLayout] = useState(false);
   const [lockedTheme, setLockedTheme] = useState(false);
   const [lockedFont, setLockedFont] = useState(false);
@@ -233,11 +237,15 @@ export const CustomizeModal: React.FC<Props> = ({
       className="fixed right-4 top-4 bottom-4 w-full max-w-[450px] z-50 flex flex-col justify-center pointer-events-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Appearance customization"
+      aria-labelledby="customize-drawer-title"
     >
-      <div className="bg-[#0A0A0C]/95 backdrop-blur-xl border border-[#334155] w-full max-h-[calc(100vh-32px)] overflow-hidden flex flex-col shadow-2xl rounded-xl pointer-events-auto animate-in slide-in-from-right duration-300">
+      <div
+        ref={drawerRef}
+        tabIndex={-1}
+        className="bg-[#0A0A0C]/95 backdrop-blur-xl border border-[#334155] w-full max-h-[calc(100vh-32px)] overflow-hidden flex flex-col shadow-2xl rounded-xl pointer-events-auto animate-in slide-in-from-right duration-300"
+      >
         <div className="flex justify-between items-center p-5 border-b border-[#334155] bg-[#0F172A]">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <h3 id="customize-drawer-title" className="text-lg font-bold text-white flex items-center gap-2">
             <Palette className="w-5 h-5 text-[#6D28D9]" />
             Appearance
           </h3>
@@ -267,6 +275,7 @@ export const CustomizeModal: React.FC<Props> = ({
               </h4>
               <button
                 onClick={() => setLockedLayout(!lockedLayout)}
+                aria-label="Lock layout during randomize"
                 className={`p-1 rounded transition-colors ${lockedLayout ? "text-[#34D399] bg-[#064E3B]/30" : "text-[#64748B] hover:text-white"}`}
                 title="Lock Layout during randomize"
               >
@@ -304,6 +313,7 @@ export const CustomizeModal: React.FC<Props> = ({
               </h4>
               <button
                 onClick={() => setLockedTheme(!lockedTheme)}
+                aria-label="Lock syntax theme during randomize"
                 className={`p-1 rounded transition-colors ${lockedTheme ? "text-[#34D399] bg-[#064E3B]/30" : "text-[#64748B] hover:text-white"}`}
                 title="Lock Theme during randomize"
               >
@@ -351,6 +361,7 @@ export const CustomizeModal: React.FC<Props> = ({
                   </label>
                   <button
                     onClick={() => setLockedFont(!lockedFont)}
+                    aria-label="Lock font family during randomize"
                     className={`p-1 rounded transition-colors ${lockedFont ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
                   >
                     {lockedFont ? (
@@ -380,6 +391,7 @@ export const CustomizeModal: React.FC<Props> = ({
                   </label>
                   <button
                     onClick={() => setLockedRadius(!lockedRadius)}
+                    aria-label="Lock corner radius during randomize"
                     className={`p-1 rounded transition-colors ${lockedRadius ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
                   >
                     {lockedRadius ? (
@@ -409,6 +421,7 @@ export const CustomizeModal: React.FC<Props> = ({
                   </label>
                   <button
                     onClick={() => setLockedTint(!lockedTint)}
+                    aria-label="Lock accent tint during randomize"
                     className={`p-1 rounded transition-colors ${lockedTint ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
                   >
                     {lockedTint ? (
@@ -632,6 +645,7 @@ export const CustomizeModal: React.FC<Props> = ({
               <input
                 type="text"
                 readOnly
+                aria-label="Exported customization share code"
                 value={getShareCode()}
                 className="flex-1 bg-[#111827] border border-[#334155] rounded px-3 py-2 text-xs font-mono text-[#94A3B8] focus:outline-none"
                 onClick={(e) => {
@@ -653,6 +667,7 @@ export const CustomizeModal: React.FC<Props> = ({
             <div className="flex gap-2">
               <input
                 type="text"
+                aria-label="Paste customization share code"
                 value={shareCodeInput}
                 onChange={(e) => setShareCodeInput(e.target.value)}
                 placeholder="Paste a share code here..."

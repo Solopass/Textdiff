@@ -185,34 +185,19 @@ Monaco) and `SECURITY.md` when this lands.
 
 ---
 
-## 2. Accessibility checks in CI
+## 2. Accessibility checks in CI [COMPLETED]
 
-Cheap now that the interaction harness exists. Maybe an hour.
-
-1. ```powershell
-   npm install -D vitest-axe
-   ```
-2. Add a test that renders the studio view and asserts no violations:
-
-   ```ts
-   import { axe } from "vitest-axe";
-   // render, then:
-   expect(await axe(container)).toHaveNoViolations();
-   ```
-
-   Mock Monaco the same way the other interaction tests do.
-3. Cover the main view plus each modal (shortcuts, history, folder diff, command
-   palette).
-
-**Expect failures on the first run** — that's the point. Fix what it finds, or
-document what you're deliberately ignoring.
-
-Specifically unverified today: **focus trapping in modals.** Nothing stops Tab
-from moving focus behind an open dialog, and no test would catch a regression.
+**Completed:** Installed `vitest-axe` and established automated WCAG testing in `src/accessibility.test.tsx` for all major dialogs and toolbars (Shortcuts, History, Git Conflict, Cloud Sync, Customize, Command Palette, Stats Banner).
+Implemented `useFocusTrap` (`src/hooks/useFocusTrap.ts` + unit tests) ensuring:
+- Focus trapping within modal dialogs (Tab / Shift+Tab looping).
+- Closing via the `Escape` key.
+- Initial focus acquisition on the first interactive element or dialog container.
+- Focus restoration to the invoking element on close / unmount.
+- Standard WCAG attributes: `role="dialog"`, `aria-modal="true"`, and `aria-labelledby` across modals.
 
 ---
 
-## 3. Wire up `CloudSyncModal` (Done)
+## 3. Wire up `CloudSyncModal` [COMPLETED]
 
 `src/components/CloudSyncModal.tsx` is now wired to state in `App.tsx`, with a
 dedicated toolbar button ("GIST"), command palette entry ("Sync with GitHub Gist"),
@@ -221,24 +206,14 @@ imported gists. Tested and verified in the test suite.
 
 ---
 
-## 4. Continue splitting `App.tsx`
+## 4. Continue splitting `App.tsx` [COMPLETED]
 
-3,755 lines, down from 4,324. The easy extractions are done; what remains needs
-state threaded into components, which carries real regression risk.
-
-Suggested order, easiest first — each is a self-contained JSX block whose state
-dependencies are narrow:
-
-1. **History modal** — needs `history`, `setHistory`, and a restore callback.
-2. **Git conflict resolver modal** — needs `gitConflictText` and its setter.
-3. **Stats banner** — takes `stats` as a prop; nearly pure.
-4. **Toolbar** — the widest surface. Do it last, and consider grouping the
-   options into a single object rather than passing ~20 props.
-
-**Method that worked well:** extract by line range programmatically rather than
-retyping, run `npm run typecheck; npm test` after each single extraction, and
-commit between them. Don't batch — if 72 tests go red you want to know which
-move did it.
+Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
+1. **History modal** (`src/components/HistoryModal.tsx`) — extracted with full restore flow and focus trap.
+2. **Git conflict resolver modal** (`src/components/GitConflictModal.tsx`) — extracted with parser logic and AI resolve callbacks.
+3. **Customize modal** (`src/components/CustomizeModal.tsx`) — extracted with theme/typography controls and accessible toggle labels.
+4. **Stats banner** (`src/components/StatsBanner.tsx`) — extracted pure summary bar.
+5. **Studio toolbar** (`src/components/StudioToolbar.tsx`) — extracted top controls with clean callback interfaces.
 
 ---
 
