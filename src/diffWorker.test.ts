@@ -198,3 +198,108 @@ describe("computeDiffStats", () => {
     expect(s).toMatchObject({ adds: 1, dels: 1, unchanged: 2, similarity: 67 });
   });
 });
+
+describe("detectMovedBlocks", () => {
+  it("identifies a multi-line block moved from top to bottom", () => {
+    const a = [
+      "anchor1();",
+      "anchor2();",
+      "anchor3();",
+      "function helper() {",
+      "  console.log('helper');",
+      "  return true;",
+      "}",
+      "footer1();",
+      "footer2();",
+      "footer3();",
+      "footer4();",
+      "footer5();",
+    ];
+    const b = [
+      "anchor1();",
+      "anchor2();",
+      "anchor3();",
+      "footer1();",
+      "footer2();",
+      "footer3();",
+      "footer4();",
+      "footer5();",
+      "function helper() {",
+      "  console.log('helper');",
+      "  return true;",
+      "}",
+    ];
+
+    const diff = computeLCS(a, b, false, false);
+    const movedFrom = diff.filter((r) => r.moved === "from");
+    const movedTo = diff.filter((r) => r.moved === "to");
+
+    expect(movedFrom.length).toBe(4);
+    expect(movedTo.length).toBe(4);
+    expect(movedFrom[0].movedBlockId).toBe(1);
+    expect(movedTo[0].movedBlockId).toBe(1);
+    expect(movedFrom.map((r) => r.lineA)).toEqual([
+      "function helper() {",
+      "  console.log('helper');",
+      "  return true;",
+      "}",
+    ]);
+    expect(movedTo.map((r) => r.lineB)).toEqual([
+      "function helper() {",
+      "  console.log('helper');",
+      "  return true;",
+      "}",
+    ]);
+  });
+
+  it("does not tag single short punctuation lines as moved", () => {
+    const a = ["foo();", "}", "bar();"];
+    const b = ["bar();", "baz();", "}"];
+
+    const diff = computeLCS(a, b, false, false);
+    // Single brace '}' should not be falsely tagged as a moved block
+    const movedBraces = diff.filter(
+      (r) => (r.lineA === "}" || r.lineB === "}") && r.moved !== undefined
+    );
+    expect(movedBraces).toHaveLength(0);
+  });
+
+  it("assigns distinct movedBlockId numbers to distinct moved blocks", () => {
+    const a = [
+      "anchorOne_A();",
+      "anchorOne_B();",
+      "anchorOne_C();",
+      "const ALPHA = 'long_string_alpha';",
+      "const ALPHA2 = 'long_string_alpha2';",
+      "anchorTwo_A();",
+      "anchorTwo_B();",
+      "anchorTwo_C();",
+      "const BETA = 'long_string_beta';",
+      "const BETA2 = 'long_string_beta2';",
+      "anchorThree_A();",
+      "anchorThree_B();",
+      "anchorThree_C();",
+    ];
+    const b = [
+      "anchorOne_A();",
+      "anchorOne_B();",
+      "anchorOne_C();",
+      "const BETA = 'long_string_beta';",
+      "const BETA2 = 'long_string_beta2';",
+      "anchorTwo_A();",
+      "anchorTwo_B();",
+      "anchorTwo_C();",
+      "anchorThree_A();",
+      "anchorThree_B();",
+      "anchorThree_C();",
+      "const ALPHA = 'long_string_alpha';",
+      "const ALPHA2 = 'long_string_alpha2';",
+    ];
+
+    const diff = computeLCS(a, b, false, false);
+    const blockIds = new Set(
+      diff.filter((r) => r.movedBlockId !== undefined).map((r) => r.movedBlockId)
+    );
+    expect(blockIds.size).toBe(2);
+  });
+});

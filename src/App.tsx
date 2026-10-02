@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, Suspense, lazy } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback, Suspense, lazy } from "react";
 import { TableVirtuoso, Virtuoso } from "react-virtuoso";
 
 // Both of these are optional panels that most sessions never open, and
@@ -141,6 +141,11 @@ export default function App() {
   const [isResolvingAI, setIsResolvingAI] = useState(false);
   const [showGithubPanel, setShowGithubPanel] = useState(false);
   const [showMultiplayer, setShowMultiplayer] = useState(false);
+  const [editingCell, setEditingCell] = useState<{
+    side: "orig" | "mod";
+    lineNum: number;
+    text: string;
+  } | null>(null);
   const [uiFont, setUiFont] = useState<"sans" | "mono" | "serif" | "dyslexic">(
     "sans",
   );
@@ -1413,6 +1418,33 @@ export default function App() {
     });
   };
 
+  const commitInlineEdit = useCallback(() => {
+    if (!editingCell) return;
+    const { side, lineNum, text } = editingCell;
+    if (side === "orig") {
+      const lines = origText.split("\n");
+      if (lineNum >= 1 && lineNum <= lines.length) {
+        lines[lineNum - 1] = text;
+        const newOrig = lines.join("\n");
+        setOrigText(newOrig);
+        if (diffResult) {
+          runDiff(newOrig, modText, ignoreWs, ignoreCase, trimBlankLines);
+        }
+      }
+    } else {
+      const lines = modText.split("\n");
+      if (lineNum >= 1 && lineNum <= lines.length) {
+        lines[lineNum - 1] = text;
+        const newMod = lines.join("\n");
+        setModText(newMod);
+        if (diffResult) {
+          runDiff(origText, newMod, ignoreWs, ignoreCase, trimBlankLines);
+        }
+      }
+    }
+    setEditingCell(null);
+  }, [editingCell, origText, modText, diffResult, ignoreWs, ignoreCase, trimBlankLines]);
+
   const handleCopyReport = () => {
     if (!stats) return;
     const report = `--- TextDiff Studio Report ---
@@ -2388,6 +2420,7 @@ Date: ${new Date().toLocaleString()}
                 {effectiveViewMode === "split" ? (
                   <TableVirtuoso
                     data={visibleDiffResult}
+                    initialItemCount={visibleDiffResult.length}
                     useWindowScroll
                     className="w-full border-collapse table-fixed min-w-[600px]"
                     components={{
@@ -2436,60 +2469,58 @@ Date: ${new Date().toLocaleString()}
                               </td>
                             )}
                             <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8]`}
-                              dangerouslySetInnerHTML={{
-                                __html: highlightCode(
-                                  item.lineA,
-                                  syntaxTheme,
-                                  language,
-                                ),
-                              }}
-                            ></td>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#64748B] bg-[#111827] border-r border-l border-[#334155] select-none pr-2 py-0.5">
-                                {item.lineNumB}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8]`}
-                              dangerouslySetInnerHTML={{
-                                __html: highlightCode(
-                                  item.lineB,
-                                  syntaxTheme,
-                                  language,
-                                ),
-                              }}
-                            ></td>
-                          </>
-                        )}
-                        {item.type === "del" && (
-                          <>
-                            {showLineNums && (
-                              <td className="w-10 text-right text-[#EF4444] bg-[#450a0a]/30 border-r border-[#EF4444]/30 select-none pr-2 py-0.5">
-                                {item.lineNumA}
-                              </td>
-                            )}
-                            <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#450a0a]/20 text-[#FCA5A5] border-r border-[#334155]/30`}
+                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8] cursor-text`}
+                              onDoubleClick={() =>
+                                item.lineNumA !== null &&
+                                setEditingCell({
+                                  side: "orig",
+                                  lineNum: item.lineNumA,
+                                  text: item.lineA,
+                                })
+                              }
+                              title="Double-click to edit line"
                             >
-                              {item.partsA ? (
-                                item.partsA.map((part, i) => (
-                                  <span
-                                    key={i}
-                                    className={
-                                      part.type === "del"
-                                        ? "bg-[#EF4444]/40 text-white rounded-[2px]"
-                                        : ""
+                              {editingCell &&
+                              editingCell.side === "orig" &&
+                              editingCell.lineNum === item.lineNumA ? (
+                                <div className="flex items-center gap-1.5 w-full py-0.5">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    ref={(el) => el?.select()}
+                                    value={editingCell.text}
+                                    onChange={(e) =>
+                                      setEditingCell((prev) =>
+                                        prev ? { ...prev, text: e.target.value } : null,
+                                      )
                                     }
-                                    dangerouslySetInnerHTML={{
-                                      __html: highlightCode(
-                                        part.text,
-                                        syntaxTheme,
-                                        language,
-                                      ),
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitInlineEdit();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
                                     }}
+                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
                                   />
-                                ))
+                                  <button
+                                    type="button"
+                                    onClick={commitInlineEdit}
+                                    title="Save (Enter)"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingCell(null)}
+                                    title="Cancel (Esc)"
+                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
                               ) : (
                                 <span
                                   dangerouslySetInnerHTML={{
@@ -2500,6 +2531,181 @@ Date: ${new Date().toLocaleString()}
                                     ),
                                   }}
                                 />
+                              )}
+                            </td>
+                            {showLineNums && (
+                              <td className="w-10 text-right text-[#64748B] bg-[#111827] border-r border-l border-[#334155] select-none pr-2 py-0.5">
+                                {item.lineNumB}
+                              </td>
+                            )}
+                            <td
+                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} text-[#94A3B8] cursor-text`}
+                              onDoubleClick={() =>
+                                item.lineNumB !== null &&
+                                setEditingCell({
+                                  side: "mod",
+                                  lineNum: item.lineNumB,
+                                  text: item.lineB,
+                                })
+                              }
+                              title="Double-click to edit line"
+                            >
+                              {editingCell &&
+                              editingCell.side === "mod" &&
+                              editingCell.lineNum === item.lineNumB ? (
+                                <div className="flex items-center gap-1.5 w-full py-0.5">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    ref={(el) => el?.select()}
+                                    value={editingCell.text}
+                                    onChange={(e) =>
+                                      setEditingCell((prev) =>
+                                        prev ? { ...prev, text: e.target.value } : null,
+                                      )
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitInlineEdit();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={commitInlineEdit}
+                                    title="Save (Enter)"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingCell(null)}
+                                    title="Cancel (Esc)"
+                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <span
+                                  dangerouslySetInnerHTML={{
+                                    __html: highlightCode(
+                                      item.lineB,
+                                      syntaxTheme,
+                                      language,
+                                    ),
+                                  }}
+                                />
+                              )}
+                            </td>
+                          </>
+                        )}
+                        {item.type === "del" && (
+                          <>
+                            {showLineNums && (
+                              <td className="w-10 text-right text-[#EF4444] bg-[#450a0a]/30 border-r border-[#EF4444]/30 select-none pr-2 py-0.5">
+                                {item.lineNumA}
+                              </td>
+                            )}
+                            <td
+                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#450a0a]/20 text-[#FCA5A5] border-r border-[#334155]/30 cursor-text`}
+                              onDoubleClick={() =>
+                                item.lineNumA !== null &&
+                                setEditingCell({
+                                  side: "orig",
+                                  lineNum: item.lineNumA,
+                                  text: item.lineA,
+                                })
+                              }
+                              title="Double-click to edit line"
+                            >
+                              {editingCell &&
+                              editingCell.side === "orig" &&
+                              editingCell.lineNum === item.lineNumA ? (
+                                <div className="flex items-center gap-1.5 w-full py-0.5">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    ref={(el) => el?.select()}
+                                    value={editingCell.text}
+                                    onChange={(e) =>
+                                      setEditingCell({
+                                        ...editingCell,
+                                        text: e.target.value,
+                                      })
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitInlineEdit();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={commitInlineEdit}
+                                    title="Save (Enter)"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingCell(null)}
+                                    title="Cancel (Esc)"
+                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  {item.moved === "from" && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
+                                      title={`Moved elsewhere (Block #${item.movedBlockId})`}
+                                    >
+                                      MOVED #{item.movedBlockId} ↷
+                                    </span>
+                                  )}
+                                  {item.partsA ? (
+                                    item.partsA.map((part, i) => (
+                                      <span
+                                        key={i}
+                                        className={
+                                          part.type === "del"
+                                            ? "bg-[#EF4444]/40 text-white rounded-[2px]"
+                                            : ""
+                                        }
+                                        dangerouslySetInnerHTML={{
+                                          __html: highlightCode(
+                                            part.text,
+                                            syntaxTheme,
+                                            language,
+                                          ),
+                                        }}
+                                      />
+                                    ))
+                                  ) : (
+                                    <span
+                                      dangerouslySetInnerHTML={{
+                                        __html: highlightCode(
+                                          item.lineA,
+                                          syntaxTheme,
+                                          language,
+                                        ),
+                                      }}
+                                    />
+                                  )}
+                                </>
                               )}
                             </td>
                             {showLineNums && (
@@ -2520,36 +2726,99 @@ Date: ${new Date().toLocaleString()}
                               </td>
                             )}
                             <td
-                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#064E3B]/20 text-[#6EE7B7]`}
+                              className={`p-0.5 px-3 align-top ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} bg-[#064E3B]/20 text-[#6EE7B7] cursor-text`}
+                              onDoubleClick={() =>
+                                item.lineNumB !== null &&
+                                setEditingCell({
+                                  side: "mod",
+                                  lineNum: item.lineNumB,
+                                  text: item.lineB,
+                                })
+                              }
+                              title="Double-click to edit line"
                             >
-                              {item.partsB ? (
-                                item.partsB.map((part, i) => (
-                                  <span
-                                    key={i}
-                                    className={
-                                      part.type === "add"
-                                        ? "bg-[#10B981]/40 text-white rounded-[2px]"
-                                        : ""
+                              {editingCell &&
+                              editingCell.side === "mod" &&
+                              editingCell.lineNum === item.lineNumB ? (
+                                <div className="flex items-center gap-1.5 w-full py-0.5">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    ref={(el) => el?.select()}
+                                    value={editingCell.text}
+                                    onChange={(e) =>
+                                      setEditingCell({
+                                        ...editingCell,
+                                        text: e.target.value,
+                                      })
                                     }
-                                    dangerouslySetInnerHTML={{
-                                      __html: highlightCode(
-                                        part.text,
-                                        syntaxTheme,
-                                        language,
-                                      ),
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitInlineEdit();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
                                     }}
+                                    className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
                                   />
-                                ))
+                                  <button
+                                    type="button"
+                                    onClick={commitInlineEdit}
+                                    title="Save (Enter)"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingCell(null)}
+                                    title="Cancel (Esc)"
+                                    className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
                               ) : (
-                                <span
-                                  dangerouslySetInnerHTML={{
-                                    __html: highlightCode(
-                                      item.lineB,
-                                      syntaxTheme,
-                                      language,
-                                    ),
-                                  }}
-                                />
+                                <>
+                                  {item.moved === "to" && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
+                                      title={`Moved from elsewhere (Block #${item.movedBlockId})`}
+                                    >
+                                      MOVED #{item.movedBlockId} ↶
+                                    </span>
+                                  )}
+                                  {item.partsB ? (
+                                    item.partsB.map((part, i) => (
+                                      <span
+                                        key={i}
+                                        className={
+                                          part.type === "add"
+                                            ? "bg-[#10B981]/40 text-white rounded-[2px]"
+                                            : ""
+                                        }
+                                        dangerouslySetInnerHTML={{
+                                          __html: highlightCode(
+                                            part.text,
+                                            syntaxTheme,
+                                            language,
+                                          ),
+                                        }}
+                                      />
+                                    ))
+                                  ) : (
+                                    <span
+                                      dangerouslySetInnerHTML={{
+                                        __html: highlightCode(
+                                          item.lineB,
+                                          syntaxTheme,
+                                          language,
+                                        ),
+                                      }}
+                                    />
+                                  )}
+                                </>
                               )}
                             </td>
                           </>
@@ -2560,6 +2829,7 @@ Date: ${new Date().toLocaleString()}
                 ) : (
                   <Virtuoso
                     data={visibleDiffResult}
+                    initialItemCount={visibleDiffResult.length}
                     useWindowScroll
                     className="w-full flex flex-col min-w-[600px] border border-[#1E293B]"
                     itemContent={(idx, item) =>
@@ -2613,52 +2883,135 @@ Date: ${new Date().toLocaleString()}
                                 : " "}
                           </div>
                           <div
-                            className={`flex-1 px-3 py-0.5 ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"}`}
+                            className={`flex-1 px-3 py-0.5 ${wordWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"} cursor-text`}
+                            onDoubleClick={() => {
+                              if (item.type === "del" && item.lineNumA !== null) {
+                                setEditingCell({
+                                  side: "orig",
+                                  lineNum: item.lineNumA,
+                                  text: item.lineA,
+                                });
+                              } else if (item.type === "add" && item.lineNumB !== null) {
+                                setEditingCell({
+                                  side: "mod",
+                                  lineNum: item.lineNumB,
+                                  text: item.lineB,
+                                });
+                              } else if (item.type === "unchanged" && item.lineNumB !== null) {
+                                setEditingCell({
+                                  side: "mod",
+                                  lineNum: item.lineNumB,
+                                  text: item.lineB,
+                                });
+                              }
+                            }}
+                            title="Double-click to edit line"
                           >
-                            {item.type === "add" ? (
-                              item.partsB ? (
-                                item.partsB.map((part, i) => (
-                                  <span
-                                    key={i}
-                                    className={
-                                      part.type === "add"
-                                        ? "bg-[#10B981]/40 text-white rounded-[2px]"
-                                        : ""
+                            {editingCell &&
+                            ((editingCell.side === "orig" && editingCell.lineNum === item.lineNumA) ||
+                             (editingCell.side === "mod" && editingCell.lineNum === item.lineNumB)) ? (
+                              <div className="flex items-center gap-1.5 w-full py-0.5">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  ref={(el) => el?.select()}
+                                  value={editingCell.text}
+                                  onChange={(e) =>
+                                    setEditingCell((prev) =>
+                                      prev ? { ...prev, text: e.target.value } : null,
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      commitInlineEdit();
+                                    } else if (e.key === "Escape") {
+                                      setEditingCell(null);
                                     }
-                                  >
-                                    {part.text}
-                                  </span>
-                                ))
-                              ) : (
-                                item.lineB
-                              )
-                            ) : item.type === "del" ? (
-                              item.partsA ? (
-                                item.partsA.map((part, i) => (
-                                  <span
-                                    key={i}
-                                    className={
-                                      part.type === "del"
-                                        ? "bg-[#EF4444]/40 text-white rounded-[2px]"
-                                        : ""
-                                    }
-                                  >
-                                    {part.text}
-                                  </span>
-                                ))
-                              ) : (
-                                item.lineA
-                              )
+                                  }}
+                                  className="flex-1 bg-[#020617] text-white border border-[#34D399] rounded px-2 py-0.5 text-xs font-mono outline-none shadow"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={commitInlineEdit}
+                                  title="Save (Enter)"
+                                  className="px-1.5 py-0.5 text-[10px] font-bold bg-[#064E3B] text-[#34D399] rounded hover:bg-[#064E3B]/80"
+                                >
+                                  ✓
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingCell(null)}
+                                  title="Cancel (Esc)"
+                                  className="px-1.5 py-0.5 text-[10px] bg-[#334155] text-[#94A3B8] rounded hover:bg-[#475569]"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             ) : (
-                              <span
-                                dangerouslySetInnerHTML={{
-                                  __html: highlightCode(
-                                    item.lineA,
-                                    syntaxTheme,
-                                    language,
-                                  ),
-                                }}
-                              />
+                              <>
+                                {item.moved === "from" && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
+                                    title={`Moved elsewhere (Block #${item.movedBlockId})`}
+                                  >
+                                    MOVED #{item.movedBlockId} ↷
+                                  </span>
+                                )}
+                                {item.moved === "to" && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-950/80 border border-indigo-500/50 text-indigo-300 font-medium mr-1.5 select-none"
+                                    title={`Moved from elsewhere (Block #${item.movedBlockId})`}
+                                  >
+                                    MOVED #{item.movedBlockId} ↶
+                                  </span>
+                                )}
+                                {item.type === "add" ? (
+                                  item.partsB ? (
+                                    item.partsB.map((part, i) => (
+                                      <span
+                                        key={i}
+                                        className={
+                                          part.type === "add"
+                                            ? "bg-[#10B981]/40 text-white rounded-[2px]"
+                                            : ""
+                                        }
+                                      >
+                                        {part.text}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    item.lineB
+                                  )
+                                ) : item.type === "del" ? (
+                                  item.partsA ? (
+                                    item.partsA.map((part, i) => (
+                                      <span
+                                        key={i}
+                                        className={
+                                          part.type === "del"
+                                            ? "bg-[#EF4444]/40 text-white rounded-[2px]"
+                                            : ""
+                                        }
+                                      >
+                                        {part.text}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    item.lineA
+                                  )
+                                ) : (
+                                  <span
+                                    dangerouslySetInnerHTML={{
+                                      __html: highlightCode(
+                                        item.lineA,
+                                        syntaxTheme,
+                                        language,
+                                      ),
+                                    }}
+                                  />
+                                )}
+                              </>
                             )}
                           </div>
                         </div>

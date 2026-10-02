@@ -81,6 +81,118 @@ export class DiffTooLargeError extends Error {
   }
 }
 
+/**
+ * Detects blocks of lines that were deleted in one place and added in another
+ * (e.g. moved functions, rearranged blocks), annotating rows with:
+ * - `moved: 'from'` on deleted lines
+ * - `moved: 'to'` on added lines
+ * - `movedBlockId`: numeric ID linking the source and destination blocks
+ */
+export const detectMovedBlocks = (
+  diff: DiffRow[],
+  normalizer?: (s: string) => string
+): void => {
+  const norm = normalizer || ((s: string) => s.trim());
+
+  type Run = {
+    type: 'del' | 'add';
+    indices: number[];
+  };
+
+  const runs: Run[] = [];
+  let currentRun: Run | null = null;
+
+  for (let i = 0; i < diff.length; i++) {
+    const row = diff[i];
+    if (row.type === 'del' || row.type === 'add') {
+      if (currentRun && currentRun.type === row.type) {
+        currentRun.indices.push(i);
+      } else {
+        currentRun = { type: row.type, indices: [i] };
+        runs.push(currentRun);
+      }
+    } else {
+      currentRun = null;
+    }
+  }
+
+  const delRuns = runs.filter((r) => r.type === 'del');
+  const addRuns = runs.filter((r) => r.type === 'add');
+
+  if (delRuns.length === 0 || addRuns.length === 0) return;
+
+  const claimedIndices = new Set<number>();
+  let nextBlockId = 1;
+
+  const maxDelLen = Math.max(...delRuns.map((r) => r.indices.length));
+  const maxAddLen = Math.max(...addRuns.map((r) => r.indices.length));
+  const maxL = Math.min(maxDelLen, maxAddLen);
+
+  for (let len = maxL; len >= 1; len--) {
+    const addMap = new Map<string, number[][]>();
+
+    for (const addRun of addRuns) {
+      for (let start = 0; start <= addRun.indices.length - len; start++) {
+        const sliceIndices = addRun.indices.slice(start, start + len);
+        if (sliceIndices.some((idx) => claimedIndices.has(idx))) continue;
+
+        const lines = sliceIndices.map((idx) => norm(diff[idx].lineB));
+        const totalCharCount = lines.reduce((acc, l) => acc + l.trim().length, 0);
+
+        if ((len >= 2 && totalCharCount >= 6) || (len === 1 && totalCharCount >= 20)) {
+          const key = lines.join('\n');
+          const existing = addMap.get(key) || [];
+          existing.push(sliceIndices);
+          addMap.set(key, existing);
+        }
+      }
+    }
+
+    if (addMap.size === 0) continue;
+
+    for (const delRun of delRuns) {
+      for (let start = 0; start <= delRun.indices.length - len; start++) {
+        const sliceIndices = delRun.indices.slice(start, start + len);
+        if (sliceIndices.some((idx) => claimedIndices.has(idx))) continue;
+
+        const lines = sliceIndices.map((idx) => norm(diff[idx].lineA));
+        const totalCharCount = lines.reduce((acc, l) => acc + l.trim().length, 0);
+
+        if ((len >= 2 && totalCharCount >= 6) || (len === 1 && totalCharCount >= 20)) {
+          const key = lines.join('\n');
+          const matchingSlices = addMap.get(key);
+          if (matchingSlices && matchingSlices.length > 0) {
+            let addSlice: number[] | null = null;
+            while (matchingSlices.length > 0) {
+              const cand = matchingSlices.shift()!;
+              if (!cand.some((idx) => claimedIndices.has(idx))) {
+                addSlice = cand;
+                break;
+              }
+            }
+
+            if (addSlice) {
+              const blockId = nextBlockId++;
+
+              for (const dIdx of sliceIndices) {
+                diff[dIdx].moved = 'from';
+                diff[dIdx].movedBlockId = blockId;
+                claimedIndices.add(dIdx);
+              }
+
+              for (const aIdx of addSlice) {
+                diff[aIdx].moved = 'to';
+                diff[aIdx].movedBlockId = blockId;
+                claimedIndices.add(aIdx);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
 export const computeLCS = (aLines: string[], bLines: string[], ignoreWhitespace: boolean, ignoreCasing: boolean) => {
   const normalize = makeNormalizer(ignoreWhitespace, ignoreCasing);
 
@@ -157,16 +269,22 @@ export const computeLCS = (aLines: string[], bLines: string[], ignoreWhitespace:
     diff.push({ type: 'unchanged', lineA: aLines[aIdx], lineB: bLines[bIdx], lineNumA: aIdx + 1, lineNumB: bIdx + 1 });
   }
 
+  detectMovedBlocks(diff, normalize);
+
   for (let k = 0; k < diff.length; k++) {
     if (diff[k].type === 'del' && k + 1 < diff.length && diff[k + 1].type === 'add') {
-      const { partsA, partsB } = computeTokenDiff(diff[k].lineA, diff[k+1].lineB);
-      diff[k].partsA = partsA;
-      diff[k+1].partsB = partsB;
+      if (!diff[k].moved && !diff[k + 1].moved) {
+        const { partsA, partsB } = computeTokenDiff(diff[k].lineA, diff[k + 1].lineB);
+        diff[k].partsA = partsA;
+        diff[k + 1].partsB = partsB;
+      }
       k++;
     } else if (diff[k].type === 'add' && k + 1 < diff.length && diff[k + 1].type === 'del') {
-      const { partsA, partsB } = computeTokenDiff(diff[k+1].lineA, diff[k].lineB);
-      diff[k+1].partsA = partsA;
-      diff[k].partsB = partsB;
+      if (!diff[k].moved && !diff[k + 1].moved) {
+        const { partsA, partsB } = computeTokenDiff(diff[k + 1].lineA, diff[k].lineB);
+        diff[k + 1].partsA = partsA;
+        diff[k].partsB = partsB;
+      }
       k++;
     }
   }

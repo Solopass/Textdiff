@@ -21,6 +21,8 @@ export type DiffRow = {
   lineNumB: number | null;
   partsA?: WordPart[];
   partsB?: WordPart[];
+  moved?: 'from' | 'to';
+  movedBlockId?: number;
 };
 
 export type DiffStats = {

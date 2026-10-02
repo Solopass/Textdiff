@@ -217,14 +217,22 @@ Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
 
 ---
 
-## 5. Inline editing in the diff view
+## 5. Advanced Features: Inline Editing, Moved Block Detection & Adjustable Fold Context [COMPLETED]
 
-The highest-value unbuilt feature, and genuinely hard: edit directly in the
-unified/split output with the diff recomputing live. Needs the virtualized rows
-to become editable and a debounce back into the worker.
-
-Do this after 1–4. It touches the most complex part of the UI, and you'll want
-the a11y checks and a smaller `App.tsx` in place first.
+**Completed:**
+1. **Adjustable Fold Context:**
+   - Replaced hardcoded 3-line fold context with selectable options (1, 3, 5, 10 lines).
+   - Added persistence in `tds_config` (`localStorage`) across mounts, with full coverage in `persistence.test.tsx`.
+   - Exposed quick selectors in `StudioToolbar` and dedicated options in the Command Palette (`Ctrl+K`).
+2. **Moved Block Detection:**
+   - Built greedy block relocation detection in `src/diffWorker.ts` (`detectMovedBlocks`), correlating deleted blocks with added blocks across the diff.
+   - Annotates rows with `moved: 'from' | 'to'` and `movedBlockId`, styled with distinctive accent badges (`MOVED #ID ↷` / `MOVED #ID ↶`).
+   - Covered with comprehensive unit tests in `src/diffWorker.test.ts`.
+3. **Inline Diff Editing:**
+   - Double-clicking any diff row in Split or Unified view opens an inline editor directly in the diff table.
+   - Provides keyboard shortcuts (`Enter` to save, `Escape` to cancel) and direct action buttons (`✓`, `✕`).
+   - Commits edits to `origText` / `modText` and triggers live re-diffing through the worker.
+   - Tested and verified end-to-end in `src/inlineDiffEdit.test.tsx`.
 
 ---
 
