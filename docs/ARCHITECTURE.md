@@ -9,9 +9,11 @@ something in this document, read the reasoning first.
 ```
 index.html          CSP, SEO/social meta, service worker registration
   └── src/main.tsx
-        └── src/App.tsx           ~3,750 lines: state, toolbar, diff render
+        └── src/App.tsx           ~2,400 lines: core state, editor/diff rendering
               ├── diffWorker.ts   the diff engine (runs off the main thread)
               ├── firebase.ts     lazily initialised Firestore accessor
+              ├── hooks/
+              │     └── useFocusTrap.ts  keyboard focus trapping for accessible modals
               ├── lib/
               │     ├── diffStats.ts   DiffRow/WordPart types + computeDiffStats
               │     ├── highlight.ts   Prism highlighting + HTML export
@@ -21,23 +23,30 @@ index.html          CSP, SEO/social meta, service worker registration
               │     └── types.ts       shared type re-exports
               └── components/
                     ├── EditorPane.tsx       Monaco wrapper
+                    ├── StudioToolbar.tsx    toolbar controls, actions, fold context
+                    ├── StatsBanner.tsx      diff stats summary bar & jump controls
                     ├── ShortcutsModal.tsx   keyboard reference
                     ├── CommandPalette.tsx   Ctrl+K palette (+ fuzzyScore)
+                    ├── CloudSyncModal.tsx   GitHub Gist import/export sync tool
+                    ├── GitConflictModal.tsx 3-way merge conflict resolver
+                    ├── HistoryModal.tsx     diff snapshot history manager
+                    ├── CustomizeModal.tsx   theme, typography & custom CSS modal
                     ├── FolderDiff.tsx       folder/ZIP comparison (+ compare, stripRoot)
                     ├── GitHubIntegration.tsx
                     ├── MultiplayerMode.tsx
                     ├── SettingsPage.tsx
-                    ├── LandingPage.tsx
-                    └── CloudSyncModal.tsx   (imported but not currently rendered)
+                    └── LandingPage.tsx
 scripts/
-  └── cleanup-expired-shares.mjs   deletes expired share documents (Admin SDK)
+  ├── cleanup-expired-shares.mjs   deletes expired share documents (Admin SDK)
+  ├── Check-Bundle.ps1             verifies lazy chunks & bundle size constraints
+  └── smoke-built-app.mjs          verifies built production HTML/JS loads cleanly
 server.ts           Express + Socket.IO + Gemini proxy. NOT deployed to Pages.
 ```
 
-`App.tsx` still holds most of the UI. It was ~4,300 lines; the module-level
-helpers and the two self-contained components above have been lifted out.
-Further reduction means threading state into extracted components, which is
-tracked in `ROADMAP.md`.
+`App.tsx` coordinates high-level state, editor synchronization, and diff rendering.
+Extracted modals (`CloudSyncModal`, `GitConflictModal`, `HistoryModal`, `CustomizeModal`)
+and major chrome widgets (`StudioToolbar`, `StatsBanner`) have been lifted out into
+modular, testable components with accessible dialog attributes and focus trapping.
 
 ### Why `lib/diffStats.ts` is separate from `diffWorker.ts`
 
@@ -99,6 +108,24 @@ whitespace-collapsed form.
 
 > These flags were accepted and silently discarded here for a long time —
 > `normalize` was defined and never called. There's a regression test for it.
+
+### Moved block detection — `detectMovedBlocks`
+
+Standard LCS treats code relocated elsewhere in a file as an unrelated deletion at
+the source location and addition at the destination. `detectMovedBlocks` runs as a
+post-processing pass across computed diff rows:
+
+1. Gathers contiguous deletion blocks (`type === 'delete'`) and insertion blocks
+   (`type === 'insert'`).
+2. Normalizes whitespace and strips trivial punctuation to form block fingerprints.
+   Trivial single-line tokens (like standalone braces or comments) are excluded to
+   prevent noisy false positives.
+3. Greedily pairs identical line sequences across deleted and added spans.
+4. Marks matching rows with `moved: 'from' | 'to'` and a unique `movedBlockId`.
+
+In the UI, rows with moved blocks display purple accent indicators and badges
+(`MOVED #ID ↷` at origin, `MOVED #ID ↶` at destination) in both Split and Unified
+views without disrupting vertical line alignment.
 
 ### Statistics
 
@@ -241,19 +268,39 @@ so an oversized share produces a clear message instead of an opaque
 `PERMISSION_DENIED`. If you change the payload shape, `firestore.rules` pins the
 allowed keys and must change with it — see `SECURITY.md`.
 
+## Interactive Diff Features
+
+### Adjustable Fold Context
+
+Diff hunk folding preserves lines around changes so users can understand code context.
+Instead of hardcoding a fixed 3-line envelope, users can select 1, 3, 5, or 10 lines of
+context directly from the toolbar or via Ctrl+K commands in the Command Palette.
+This choice is stored in `tds_config` (`foldContextLines`) and restored across sessions.
+
+### Inline Diff Editing
+
+Users can double-click any cell in Split or Unified diff views to edit text directly inline:
+1. Double-clicking activates an inline input pre-populated with the row's text and automatically focuses it.
+2. Pressing `Enter` or clicking the checkmark saves the change directly to `origText` (for left/original side)
+   or `modText` (for right/modified side).
+3. Saving commits the text mutation and triggers an immediate worker diff computation without
+   requiring the user to navigate back to the raw Monaco editors.
+4. Pressing `Escape` or clicking cancel discards pending edits.
+
 ## Testing
 
-`npm test` (Vitest + jsdom). 72 tests across two layers.
+`npm test` (Vitest + jsdom). 98 tests across 12 test suites.
 
 **Unit — pure logic:**
 
 - `src/diffWorker.test.ts` — engine correctness, line-number offsets after
-  peeling, ignore flags in both modes, the size cap.
+  peeling, ignore flags in both modes, the size cap, moved block detection.
 - `src/components/FolderDiff.test.ts` — status classification, root stripping.
 - `src/components/CommandPalette.test.ts` — fuzzy matching and ranking.
+- `src/hooks/useFocusTrap.test.ts` — Tab/Shift+Tab looping, Escape closing, focus restoration.
 - `computeDiffStats` coverage lives in `src/diffWorker.test.ts`.
 
-**Interaction — driven through the real UI:**
+**Interaction & Accessibility — driven through the real UI:**
 
 - `src/App.interaction.test.tsx` — landing to studio, typing, running a
   comparison, swap/clear/sample, view switching.
@@ -263,6 +310,10 @@ allowed keys and must change with it — see `SECURITY.md`.
   survival of a throwing localStorage.
 - `src/shareExpiry.test.tsx` — expired links refused, missing links reported,
   pre-expiry links still readable. Firestore is mocked at the module boundary.
+- `src/accessibility.test.tsx` — automated WCAG 2.1 AA audits (`vitest-axe`) and
+  modal keyboard accessibility across all dialogs.
+- `src/inlineDiffEdit.test.tsx` — double-click inline cell editing, saving modifications,
+  and cancelling in both Split and Unified diff views.
 
 ### Two substitutions make this possible
 
@@ -285,14 +336,20 @@ jsdom also lacks `matchMedia`, `ResizeObserver` and `scrollIntoView`; all are
 stubbed in `src/setupTests.ts`. The app additionally guards `matchMedia` at the
 call site, since older embedded webviews lack it too.
 
-### Known limits
+### Virtualization & Testing under jsdom
 
-- **`react-virtuoso` renders no rows under jsdom.** It measures element heights
-  to decide what to mount, and jsdom reports every height as 0. Assert against
-  the summary panel (similarity, add/delete counts) rather than row contents.
-- **Similarity is unified via `computeDiffStats`.** Both the worker and `App.tsx`
-  use `computeDiffStats` from `lib/diffStats.ts` (`unchanged / max(linesA, linesB)`),
-  ensuring displayed statistics never drift from engine calculations.
+`react-virtuoso` measures DOM element heights to decide what rows to mount. In
+headless jsdom, element heights report as 0. To ensure immediate initial rendering
+without layout delay and allow integration tests to interact with diff rows directly,
+`TableVirtuoso` and `Virtuoso` pass `initialItemCount={visibleDiffResult.length}`.
+This allows tests like `src/inlineDiffEdit.test.tsx` to double-click and verify
+rendered DOM rows directly.
+
+### Similarity is unified via `computeDiffStats`
+
+Both the worker and `App.tsx` use `computeDiffStats` from `lib/diffStats.ts`
+(`unchanged / max(linesA, linesB)`), ensuring displayed statistics never drift
+from engine calculations.
 
 ### Verifying a test can actually fail
 
