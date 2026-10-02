@@ -290,11 +290,9 @@ call site, since older embedded webviews lack it too.
 - **`react-virtuoso` renders no rows under jsdom.** It measures element heights
   to decide what to mount, and jsdom reports every height as 0. Assert against
   the summary panel (similarity, add/delete counts) rather than row contents.
-- **Similarity is computed twice, inconsistently.** The worker sends
-  `stats.similarity` as `unchanged / max(lenA, lenB)`; `App.tsx` ignores that
-  field and recomputes as `unchanged / (adds + dels + unchanged)`, which counts
-  a modified line twice. For a 3-line file with one change that is 50% rather
-  than 67%. The displayed figure is App's. Worth reconciling.
+- **Similarity is unified via `computeDiffStats`.** Both the worker and `App.tsx`
+  use `computeDiffStats` from `lib/diffStats.ts` (`unchanged / max(linesA, linesB)`),
+  ensuring displayed statistics never drift from engine calculations.
 
 ### Verifying a test can actually fail
 

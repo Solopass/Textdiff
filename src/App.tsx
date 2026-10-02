@@ -72,6 +72,11 @@ import {
 import { LandingPage } from "./components/LandingPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { CloudSyncModal } from "./components/CloudSyncModal";
+import { GitConflictModal, type GitConflictParseResult } from "./components/GitConflictModal";
+import { HistoryModal } from "./components/HistoryModal";
+import { StatsBanner } from "./components/StatsBanner";
+import { StudioToolbar } from "./components/StudioToolbar";
+import { CustomizeModal } from "./components/CustomizeModal";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 // jspdf, html2canvas and the Firebase SDK are all large and only needed for
 // specific user actions, so they are imported dynamically at their call sites
@@ -144,59 +149,12 @@ export default function App() {
   const [uiTint, setUiTint] = useState<
     "default" | "blue" | "purple" | "rose" | "amber" | "monochrome" | "invert"
   >("default");
-  const [lockedLayout, setLockedLayout] = useState(false);
-  const [lockedTheme, setLockedTheme] = useState(false);
-  const [lockedFont, setLockedFont] = useState(false);
-  const [lockedRadius, setLockedRadius] = useState(false);
-  const [lockedTint, setLockedTint] = useState(false);
   const [uiFontSize, setUiFontSize] = useState<'sm' | 'base' | 'lg'>('base');
   const [uiTexture, setUiTexture] = useState<'none' | 'dots' | 'grid' | 'noise'>('none');
   const [uiMotion, setUiMotion] = useState<'default' | 'reduced'>('default');
   const [uiGlass, setUiGlass] = useState(false);
   const [customCSS, setCustomCSS] = useState('');
   const [uiSound, setUiSound] = useState<'enabled' | 'disabled'>('disabled');
-
-  const randomizeCustomization = () => {
-    const layouts = [
-      "standard",
-      "fluid",
-      "compact",
-      "zen",
-      "presentation",
-      "terminal",
-    ];
-    const themes = [
-      "dark",
-      "light",
-      "high-contrast",
-      "dracula",
-      "hacker",
-      "solarized-light",
-      "oceanic",
-    ];
-    const fonts = ["sans", "mono", "serif", "dyslexic"];
-    const radii = ["default", "none", "lg", "full"];
-    const tints = [
-      "default",
-      "blue",
-      "purple",
-      "rose",
-      "amber",
-      "monochrome",
-      "invert",
-    ];
-
-    if (!lockedLayout)
-      setAppLayout(layouts[Math.floor(Math.random() * layouts.length)] as any);
-    if (!lockedTheme)
-      setSyntaxTheme(themes[Math.floor(Math.random() * themes.length)] as any);
-    if (!lockedFont)
-      setUiFont(fonts[Math.floor(Math.random() * fonts.length)] as any);
-    if (!lockedRadius)
-      setUiRadius(radii[Math.floor(Math.random() * radii.length)] as any);
-    if (!lockedTint)
-      setUiTint(tints[Math.floor(Math.random() * tints.length)] as any);
-  };
   const [customTheme, setCustomTheme] = useState({
     bg: "#020617",
     fg: "#E2E8F0",
@@ -208,12 +166,7 @@ export default function App() {
     operator: "#475569",
   });
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
-  const [shareCodeInput, setShareCodeInput] = useState("");
-  const [presetNameInput, setPresetNameInput] = useState("");
   const [loadedAnnotation, setLoadedAnnotation] = useState("");
-  const [savedPresets, setSavedPresets] = useState<
-    { name: string; config: any }[]
-  >([]);
 
   const playSound = (type = 'click') => {
     if (uiSound === 'disabled') return;
@@ -244,89 +197,6 @@ export default function App() {
     } catch (e) {}
   };
 
-  useEffect(() => {
-    try {
-      const p = localStorage.getItem("tds_presets");
-      if (p) setSavedPresets(JSON.parse(p));
-    } catch (e) {}
-  }, []);
-
-  const savePreset = () => {
-    if (!presetNameInput.trim()) return;
-    const newPresets = [
-      ...savedPresets,
-      {
-        name: presetNameInput.trim(),
-        config: {
-          appLayout,
-          syntaxTheme,
-          customTheme,
-          uiFont,
-          uiRadius,
-          uiTint,
-          uiFontSize,
-          uiTexture,
-          uiMotion,
-          customCSS,
-          uiSound,
-          uiGlass,
-        },
-      },
-    ];
-    setSavedPresets(newPresets);
-    safeSetItem("tds_presets", JSON.stringify(newPresets));
-    setPresetNameInput("");
-  };
-
-  const loadPreset = (preset: any) => {
-    if (preset.config.appLayout) setAppLayout(preset.config.appLayout);
-    if (preset.config.syntaxTheme) setSyntaxTheme(preset.config.syntaxTheme);
-    if (preset.config.customTheme) setCustomTheme(preset.config.customTheme);
-    if (preset.config.uiFont) setUiFont(preset.config.uiFont);
-    if (preset.config.uiRadius) setUiRadius(preset.config.uiRadius);
-    if (preset.config.uiTint) setUiTint(preset.config.uiTint);
-    if (preset.config.uiFontSize) setUiFontSize(preset.config.uiFontSize);
-    if (preset.config.uiTexture) setUiTexture(preset.config.uiTexture);
-    if (preset.config.uiMotion) setUiMotion(preset.config.uiMotion);
-    if (preset.config.customCSS !== undefined) setCustomCSS(preset.config.customCSS);
-    if (preset.config.uiSound) setUiSound(preset.config.uiSound);
-    if (preset.config.uiGlass !== undefined) setUiGlass(preset.config.uiGlass);
-  };
-
-  const getShareCode = () => {
-    return btoa(
-      JSON.stringify({
-        appLayout,
-        syntaxTheme,
-        customTheme,
-        uiFont,
-        uiRadius,
-        uiTint,
-      }),
-    );
-  };
-
-  const importShareCode = () => {
-    try {
-      const config = JSON.parse(atob(shareCodeInput));
-      if (config.appLayout) setAppLayout(config.appLayout);
-      if (config.syntaxTheme) setSyntaxTheme(config.syntaxTheme);
-      if (config.customTheme) setCustomTheme(config.customTheme);
-      if (config.uiFont) setUiFont(config.uiFont);
-      if (config.uiRadius) setUiRadius(config.uiRadius);
-      if (config.uiTint) setUiTint(config.uiTint);
-      if (config.uiFontSize) setUiFontSize(config.uiFontSize);
-      if (config.uiTexture) setUiTexture(config.uiTexture);
-      if (config.uiMotion) setUiMotion(config.uiMotion);
-      if (config.customCSS !== undefined) setCustomCSS(config.customCSS);
-      if (config.uiSound) setUiSound(config.uiSound);
-      if (config.uiGlass !== undefined) setUiGlass(config.uiGlass);
-      alert("Customization imported successfully!");
-      setShareCodeInput("");
-    } catch (e) {
-      alert("Invalid share code");
-    }
-  };
   const [language, setLanguage] = useState("javascript");
   const [splitRatio, setSplitRatio] = useState(50);
   const isDraggingSplitter = useRef(false);
@@ -358,6 +228,7 @@ export default function App() {
   // What is actually rendered. `viewMode` remains the persisted preference.
   const effectiveViewMode = isNarrow ? "unified" : viewMode;
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
   const [isDiffing, setIsDiffing] = useState(false);
   // Which export is currently running, so the button can show progress while
   // its (lazily fetched) library downloads.
@@ -446,42 +317,11 @@ export default function App() {
     }
   };
 
-  const handleParseGitConflict = () => {
-    const lines = gitConflictText.split("\n");
-    let orig = [];
-    let mod = [];
-    let base = [];
-    let hasBase = false;
-    let state = "normal";
-
-    for (let line of lines) {
-      if (line.startsWith("<<<<<<< ")) {
-        state = "ours";
-      } else if (line.startsWith("||||||| ")) {
-        state = "base";
-        hasBase = true;
-      } else if (line.startsWith("=======")) {
-        state = "theirs";
-      } else if (line.startsWith(">>>>>>> ")) {
-        state = "normal";
-      } else {
-        if (state === "normal") {
-          orig.push(line);
-          mod.push(line);
-          base.push(line);
-        } else if (state === "ours") {
-          orig.push(line);
-        } else if (state === "base") {
-          base.push(line);
-        } else if (state === "theirs") {
-          mod.push(line);
-        }
-      }
-    }
-    setOrigText(orig.join("\n"));
-    setModText(mod.join("\n"));
-    if (hasBase) {
-      setBaseText(base.join("\n"));
+  const handleParseGitConflictResult = (result: GitConflictParseResult) => {
+    setOrigText(result.orig);
+    setModText(result.mod);
+    if (result.isThreeWay && result.base) {
+      setBaseText(result.base);
       setIsThreeWay(true);
     } else {
       setIsThreeWay(false);
@@ -836,6 +676,7 @@ export default function App() {
       if (isFullscreen) return setIsFullscreen(false);
       if (showHelpModal) return setShowHelpModal(false);
       if (showHistoryModal) return setShowHistoryModal(false);
+      if (showCloudSyncModal) return setShowCloudSyncModal(false);
       if (showCustomizeModal) return setShowCustomizeModal(false);
       if (showFolderDiff) return setShowFolderDiff(false);
       if (showGitModal) return setShowGitModal(false);
@@ -849,6 +690,7 @@ export default function App() {
     isFullscreen,
     showHelpModal,
     showHistoryModal,
+    showCloudSyncModal,
     showGitModal,
     showCustomizeModal,
     showFolderDiff,
@@ -1825,6 +1667,13 @@ Date: ${new Date().toLocaleString()}
       run: () => setShowHistoryModal(true),
     },
     {
+      id: "cloud-sync",
+      title: "Sync with GitHub Gist",
+      group: "Share",
+      keywords: "cloud gist export import token pat",
+      run: () => setShowCloudSyncModal(true),
+    },
+    {
       id: "git-conflict",
       title: "Open Git conflict resolver",
       group: "Tools",
@@ -1926,266 +1775,73 @@ Date: ${new Date().toLocaleString()}
         )}
 
         {/* Toolbar */}
-        <section className="bg-[#111827] border border-[#334155] p-3 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2 bg-[#020617] p-1 border border-[#334155]">
-            <button
-              onClick={() => setViewMode("split")}
-              title={isNarrow ? "Split view is unavailable on small screens" : "Side-by-side view"}
-              className={`flex items-center gap-2 px-3 py-1 text-xs font-mono font-medium transition-colors ${viewMode === "split" ? "bg-[#334155] text-white" : "text-[#64748B] hover:text-[#94A3B8]"} ${isNarrow ? "opacity-50" : ""}`}
-            >
-              <SplitSquareHorizontal className="w-3.5 h-3.5" />
-              SIDE-BY-SIDE
-            </button>
-            <button
-              onClick={() => setViewMode("unified")}
-              className={`flex items-center gap-2 px-3 py-1 text-xs font-mono font-medium transition-colors ${viewMode === "unified" ? "bg-[#334155] text-white" : "text-[#64748B] hover:text-[#94A3B8]"}`}
-            >
-              <Rows className="w-3.5 h-3.5" />
-              UNIFIED
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4 flex-wrap">
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={isThreeWay}
-                onChange={(e) => setIsThreeWay(e.target.checked)}
-              />
-              {isThreeWay ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              3-WAY_MERGE
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={ignoreWs}
-                onChange={(e) => {
-                  setIgnoreWs(e.target.checked);
-                  if (diffResult)
-                    runDiff(
-                      origText,
-                      modText,
-                      e.target.checked,
-                      ignoreCase,
-                      trimBlankLines,
-                    );
-                }}
-              />
-              {ignoreWs ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              IGNORE_WS
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={ignoreCase}
-                onChange={(e) => {
-                  setIgnoreCase(e.target.checked);
-                  if (diffResult)
-                    runDiff(
-                      origText,
-                      modText,
-                      ignoreWs,
-                      e.target.checked,
-                      trimBlankLines,
-                    );
-                }}
-              />
-              {ignoreCase ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              IGNORE_CASE
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={trimBlankLines}
-                onChange={(e) => {
-                  setTrimBlankLines(e.target.checked);
-                  if (diffResult)
-                    runDiff(
-                      origText,
-                      modText,
-                      ignoreWs,
-                      ignoreCase,
-                      e.target.checked,
-                    );
-                }}
-              />
-              {trimBlankLines ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              TRIM_BLANKS
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={foldUnchanged}
-                onChange={(e) => setFoldUnchanged(e.target.checked)}
-              />
-              {foldUnchanged ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              FOLD_UNCHANGED
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors ml-2 border-l border-[#334155] pl-4">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={showLineNums}
-                onChange={(e) => setShowLineNums(e.target.checked)}
-              />
-              {showLineNums ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              LINE_NUMS
-            </label>
-            <label className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={wordWrap}
-                onChange={(e) => setWordWrap(e.target.checked)}
-              />
-              {wordWrap ? (
-                <CheckSquare className="w-4 h-4 text-[#34D399]" />
-              ) : (
-                <Square className="w-4 h-4" />
-              )}
-              WORD_WRAP
-            </label>
-            <div className="flex items-center gap-2 text-xs font-mono text-[#94A3B8] ml-2 border-l border-[#334155] pl-4">
-              <button
-                onClick={() => setShowGitModal(true)}
-                className="px-2 py-1 bg-[#1E293B] hover:bg-[#334155] text-[#94A3B8] hover:text-white border border-[#334155] rounded text-[10px] mr-2 flex items-center gap-1"
-                title="Resolve Git Conflict"
-              >
-                <GitMerge className="w-3 h-3" /> GIT
-              </button>
-
-              <button
-                onClick={() => setShowCustomizeModal(true)}
-                className="px-3 py-1.5 border border-[#6D28D9] bg-[#4C1D95] text-[#C4B5FD] hover:bg-[#6D28D9] transition-colors flex items-center gap-2 mr-2"
-              >
-                <Palette className="w-3.5 h-3.5" />
-                CUSTOMIZE
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-            <button
-              onClick={() => setShowHistoryModal(true)}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2"
-              title="Diff History"
-            >
-              <History className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setShowGithubPanel(!showGithubPanel)}
-              className={`px-3 py-1.5 border border-[#334155] ${showGithubPanel ? 'bg-[#334155] text-white' : 'bg-[#1E293B] text-[#E2E8F0]'} hover:bg-[#334155] transition-colors flex items-center gap-2`}
-            >
-              <Github className="w-3.5 h-3.5" /> GITHUB
-            </button>
-            <button
-              onClick={() => SERVER_FEATURES_ENABLED && setShowMultiplayer(!showMultiplayer)}
-              disabled={!SERVER_FEATURES_ENABLED}
-              title={SERVER_FEATURES_ENABLED ? undefined : COMING_SOON_TITLE}
-              className={`px-3 py-1.5 border border-[#334155] ${showMultiplayer ? 'bg-[#334155] text-[#34D399]' : 'bg-[#1E293B] text-[#E2E8F0]'} transition-colors flex items-center gap-2 ${SERVER_FEATURES_ENABLED ? 'hover:bg-[#334155]' : 'opacity-40 grayscale cursor-not-allowed'}`}
-            >
-              <Users className="w-3.5 h-3.5" /> MULTIPLAYER
-            </button>
-            <button
-              onClick={() => setShowHelpModal(true)}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2"
-              title="Keyboard Shortcuts"
-            >
-              <Keyboard className="w-3.5 h-3.5" />
-              HELP
-            </button>
-            <button
-              onClick={() => setShowPalette(true)}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2"
-              title="Command Palette (Ctrl+K)"
-            >
-              <Search className="w-3.5 h-3.5" aria-hidden="true" />
-              COMMANDS
-              <kbd className="text-[9px] text-[#64748B] border border-[#334155] px-1 py-0.5 font-mono ml-1">
-                ^K
-              </kbd>
-            </button>
-            <button
-              onClick={clearAll}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2 text-[#FCA5A5] hover:bg-[#450a0a]/30"
-              title="Clear All Texts"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              CLEAR
-            </button>
-            <button
-              onClick={swapTexts}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors flex items-center gap-2"
-              title="Swap Texts (Ctrl+Shift+S)"
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" />
-              SWAP
-            </button>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors outline-none cursor-pointer"
-            >
-              <option value="javascript">JAVASCRIPT</option>
-              <option value="python">PYTHON</option>
-              <option value="json">JSON</option>
-              <option value="plain">PLAIN TEXT</option>
-            </select>
-            <button
-              onClick={loadSample}
-              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors"
-            >
-              LOAD_SAMPLE
-            </button>
-            <button
-              onClick={shareUrl}
-              className="px-3 py-1.5 border border-[#3B82F6] bg-[#2563EB] text-white hover:bg-[#3B82F6] transition-colors flex items-center gap-2"
-            >
-              {isSharing ? (
-                <span className="animate-spin text-white">...</span>
-              ) : (
-                <Share2 className="w-3.5 h-3.5" />
-              )}
-              {isSharing ? "SHARING..." : "SHARE"}
-            </button>
-            <button
-              onClick={() => runDiff()}
-              className="px-4 py-1.5 border border-[#065F46] bg-[#064E3B] text-[#34D399] hover:bg-[#065F46] active:scale-95 transition-all"
-              title="Run Diff (Ctrl+Enter)"
-            >
-              RUN_DIFF
-            </button>
-          </div>
-        </section>
+        <StudioToolbar
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          isNarrow={isNarrow}
+          isThreeWay={isThreeWay}
+          setIsThreeWay={setIsThreeWay}
+          ignoreWs={ignoreWs}
+          onToggleIgnoreWs={(checked) => {
+            setIgnoreWs(checked);
+            if (diffResult)
+              runDiff(
+                origText,
+                modText,
+                checked,
+                ignoreCase,
+                trimBlankLines,
+              );
+          }}
+          ignoreCase={ignoreCase}
+          onToggleIgnoreCase={(checked) => {
+            setIgnoreCase(checked);
+            if (diffResult)
+              runDiff(
+                origText,
+                modText,
+                ignoreWs,
+                checked,
+                trimBlankLines,
+              );
+          }}
+          trimBlankLines={trimBlankLines}
+          onToggleTrimBlankLines={(checked) => {
+            setTrimBlankLines(checked);
+            if (diffResult)
+              runDiff(
+                origText,
+                modText,
+                ignoreWs,
+                ignoreCase,
+                checked,
+              );
+          }}
+          foldUnchanged={foldUnchanged}
+          setFoldUnchanged={setFoldUnchanged}
+          showLineNums={showLineNums}
+          setShowLineNums={setShowLineNums}
+          wordWrap={wordWrap}
+          setWordWrap={setWordWrap}
+          onOpenGitModal={() => setShowGitModal(true)}
+          onOpenCustomizeModal={() => setShowCustomizeModal(true)}
+          onOpenHistoryModal={() => setShowHistoryModal(true)}
+          showGithubPanel={showGithubPanel}
+          onToggleGithubPanel={() => setShowGithubPanel(!showGithubPanel)}
+          onOpenCloudSyncModal={() => setShowCloudSyncModal(true)}
+          showMultiplayer={showMultiplayer}
+          onToggleMultiplayer={() => SERVER_FEATURES_ENABLED && setShowMultiplayer(!showMultiplayer)}
+          onOpenHelpModal={() => setShowHelpModal(true)}
+          onOpenPalette={() => setShowPalette(true)}
+          onClear={clearAll}
+          onSwap={swapTexts}
+          language={language}
+          setLanguage={setLanguage}
+          onLoadSample={loadSample}
+          onShare={shareUrl}
+          isSharing={isSharing}
+          onRunDiff={() => runDiff()}
+        />
 
         {/* Input Textareas Section (Desktop Resizable Panels) */}
         
@@ -2602,151 +2258,20 @@ Date: ${new Date().toLocaleString()}
             className={`animate-in fade-in duration-300 bg-[#020617] pb-4 ${isFullscreen ? "fixed inset-0 z-50 overflow-y-auto p-4 space-y-4" : "space-y-6"}`}
           >
             {/* Stats Banner */}
-            <section className="bg-[#111827] border border-[#334155] p-4 flex flex-col gap-4">
-              <div className="flex flex-wrap items-center justify-around gap-6">
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] uppercase tracking-widest text-[#64748B] mb-1 font-serif italic">
-                    Similarity
-                  </span>
-                  <span className="text-xl font-mono text-[#34D399]">
-                    {stats.similarity}%
-                  </span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] uppercase tracking-widest text-[#64748B] mb-1 font-serif italic">
-                    Additions
-                  </span>
-                  <span className="text-xl font-mono text-[#10B981]">
-                    +{stats.addCount}
-                  </span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] uppercase tracking-widest text-[#64748B] mb-1 font-serif italic">
-                    Deletions
-                  </span>
-                  <span className="text-xl font-mono text-[#EF4444]">
-                    -{stats.delCount}
-                  </span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] uppercase tracking-widest text-[#64748B] mb-1 font-serif italic">
-                    Unchanged
-                  </span>
-                  <span className="text-xl font-mono text-[#94A3B8]">
-                    {stats.unchangedCount}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopyReport}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono"
-                  >
-                    COPY_REPORT
-                  </button>
-                  <button
-                    onClick={exportPatchReport}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    EXPORT_PATCH
-                  </button>
-                  <button
-                    onClick={exportCsvReport}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    EXPORT_CSV
-                  </button>
-                  <button
-                    onClick={exportMdReport}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    EXPORT_MD
-                  </button>
-                  <button
-                    onClick={exportRawDiff}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    EXPORT_JSON
-                  </button>
-                  <button
-                    onClick={exportHtmlReport}
-                    className="px-3 py-1.5 border border-[#1D4ED8] bg-[#1E3A8A] text-[#93C5FD] hover:bg-[#1D4ED8] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    <FileCode className="w-3.5 h-3.5" />
-                    EXPORT_HTML
-                  </button>
-                  <button
-                    onClick={exportPdfReport}
-                    disabled={isExporting !== null}
-                    aria-busy={isExporting === "pdf"}
-                    className="px-3 py-1.5 border border-[#065F46] bg-[#064E3B] text-[#34D399] hover:bg-[#065F46] transition-colors text-xs font-mono flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isExporting === "pdf" ? (
-                      <span className="w-3.5 h-3.5 border-2 border-[#065F46] border-t-[#34D399] rounded-full animate-spin" />
-                    ) : (
-                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                    )}
-                    {isExporting === "pdf" ? "BUILDING..." : "EXPORT_PDF"}
-                  </button>
-                  <button
-                    onClick={exportImageReport}
-                    disabled={isExporting !== null}
-                    aria-busy={isExporting === "png"}
-                    className="px-3 py-1.5 border border-[#6D28D9] bg-[#4C1D95] text-[#C4B5FD] hover:bg-[#6D28D9] transition-colors text-xs font-mono flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isExporting === "png" ? (
-                      <span className="w-3.5 h-3.5 border-2 border-[#6D28D9] border-t-[#C4B5FD] rounded-full animate-spin" />
-                    ) : (
-                      <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                    )}
-                    {isExporting === "png" ? "BUILDING..." : "EXPORT_PNG"}
-                  </button>
-                  <button
-                    onClick={() => setIsFullscreen(!isFullscreen)}
-                    className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"
-                  >
-                    {isFullscreen ? (
-                      <Minimize className="w-3.5 h-3.5" />
-                    ) : (
-                      <Maximize className="w-3.5 h-3.5" />
-                    )}
-                    {isFullscreen ? "EXIT_FULLSCREEN" : "FULLSCREEN"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="w-full flex flex-col gap-1">
-                <div className="flex justify-between text-[10px] font-mono text-[#64748B]">
-                  <span>Change Breakdown</span>
-                  <span>{stats.addCount + stats.delCount} Total Changes</span>
-                </div>
-                <div className="w-full h-1.5 flex rounded-full overflow-hidden bg-[#1E293B]">
-                  {stats.addCount + stats.delCount > 0 ? (
-                    <>
-                      <div
-                        style={{
-                          width: `${(stats.addCount / (stats.addCount + stats.delCount)) * 100}%`,
-                        }}
-                        className="bg-[#10B981]"
-                        title={`Additions: ${stats.addCount}`}
-                      />
-                      <div
-                        style={{
-                          width: `${(stats.delCount / (stats.addCount + stats.delCount)) * 100}%`,
-                        }}
-                        className="bg-[#EF4444]"
-                        title={`Deletions: ${stats.delCount}`}
-                      />
-                    </>
-                  ) : (
-                    <div className="w-full bg-[#475569]" title="No changes" />
-                  )}
-                </div>
-              </div>
-            </section>
+            <StatsBanner
+              stats={stats}
+              onCopyReport={handleCopyReport}
+              onExportPatch={exportPatchReport}
+              onExportCsv={exportCsvReport}
+              onExportMd={exportMdReport}
+              onExportJson={exportRawDiff}
+              onExportHtml={exportHtmlReport}
+              onExportPdf={exportPdfReport}
+              onExportPng={exportImageReport}
+              isExporting={isExporting}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+            />
 
             {/* Render Area */}
             <section
@@ -3125,605 +2650,59 @@ Date: ${new Date().toLocaleString()}
         </footer>
       </div>
 
-      {/* History Modal */}
-      {showGitModal && (
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Git conflict resolver"
-        >
-          <div className="bg-[#020617] border border-[#334155] rounded-xl w-full max-w-3xl flex flex-col max-h-[90vh] shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-[#334155] flex justify-between items-center bg-[#0F172A] rounded-t-xl">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <GitMerge className="w-5 h-5 text-[#34D399]" />
-                Git Conflict Resolver
-              </h3>
-              <button
-                onClick={() => setShowGitModal(false)}
-                className="text-[#94A3B8] hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 flex-1 flex flex-col gap-4 overflow-y-auto">
-              <p className="text-[#94A3B8] text-sm">
-                Paste a file containing standard Git conflict markers (
-                <code className="bg-[#1E293B] px-1 py-0.5 rounded text-[#F472B6]">
-                  {"<<<<<<<"}
-                </code>
-                ,{" "}
-                <code className="bg-[#1E293B] px-1 py-0.5 rounded text-[#60A5FA]">
-                  {"======="}
-                </code>
-                ,{" "}
-                <code className="bg-[#1E293B] px-1 py-0.5 rounded text-[#34D399]">
-                  {">>>>>>>"}
-                </code>
-                ). TextDiff Studio will automatically parse it and load it into
-                the 3-Way Merge editor.
-              </p>
-              <textarea
-                value={gitConflictText}
-                onChange={(e) => setGitConflictText(e.target.value)}
-                placeholder={
-                  "<<<<<<< HEAD\nconsole.log('local changes');\n=======\nconsole.log('remote changes');\n>>>>>>> feature-branch"
-                }
-                className="w-full flex-1 min-h-[300px] bg-[#0A0A0C] border border-[#334155] rounded-md p-4 text-[#E2E8F0] font-mono text-xs focus:outline-none focus:border-[#34D399] resize-none"
-              />
-              <div className="flex gap-4">
-                <button
-                  onClick={handleParseGitConflict}
-                  disabled={!gitConflictText.trim()}
-                  className="w-full py-3 bg-[#34D399] text-[#064E3B] font-bold rounded hover:bg-[#10B981] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  MANUAL PARSE
-                </button>
-                <button
-                  onClick={handleAIResolveConflict}
-                  disabled={!SERVER_FEATURES_ENABLED || !gitConflictText.trim() || isResolvingAI}
-                  title={SERVER_FEATURES_ENABLED ? undefined : COMING_SOON_TITLE}
-                  className={`w-full flex items-center justify-center gap-2 py-3 bg-[#8B5CF6] text-white font-bold rounded transition-colors disabled:cursor-not-allowed shadow-[0_0_15px_rgba(139,92,246,0.4)] ${SERVER_FEATURES_ENABLED ? 'hover:bg-[#7C3AED] disabled:opacity-50' : 'opacity-40 grayscale'}`}
-                >
-                  {isResolvingAI ? (
-                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                  ) : (
-                    <Sparkles className="w-5 h-5" />
-                  )}
-                  AI RESOLVE
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <GitConflictModal
+        isOpen={showGitModal}
+        onClose={() => setShowGitModal(false)}
+        conflictText={gitConflictText}
+        setConflictText={setGitConflictText}
+        onResolveManual={handleParseGitConflictResult}
+        onResolveAI={handleAIResolveConflict}
+        isResolvingAI={isResolvingAI}
+      />
 
-      {showHistoryModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Diff history"
-        >
-          <div className="bg-[#020617] border border-[#334155] max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-4 border-b border-[#334155] bg-[#1E293B]">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <History className="w-4 h-4 text-[#34D399]" />
-                Diff History
-              </h3>
-              <button
-                onClick={() => setShowHistoryModal(false)}
-                className="text-[#94A3B8] hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1 font-mono text-xs">
-              {history.length === 0 ? (
-                <div className="text-center text-[#64748B] py-8">
-                  No history available yet.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      className="border border-[#334155] bg-[#0F172A] p-3 flex flex-col gap-3"
-                    >
-                      <div className="flex justify-between items-center text-[#94A3B8] text-[10px]">
-                        <span>{new Date(item.timestamp).toLocaleString()}</span>
-                        <button
-                          onClick={() => {
-                            setOrigText(item.origText);
-                            setModText(item.modText);
-                            setShowHistoryModal(false);
-                            runDiff(item.origText, item.modText);
-                          }}
-                          className="px-2 py-1 bg-[#1E293B] hover:bg-[#334155] text-white transition-colors border border-[#334155]"
-                        >
-                          RESTORE
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[#E2E8F0] opacity-80">
-                        <div className="bg-black p-2 overflow-hidden whitespace-nowrap text-ellipsis border border-[#1E293B]">
-                          {item.origText.split("\n")[0] || "(empty)"}
-                        </div>
-                        <div className="bg-black p-2 overflow-hidden whitespace-nowrap text-ellipsis border border-[#1E293B]">
-                          {item.modText.split("\n")[0] || "(empty)"}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <HistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        history={history}
+        onRestore={(item) => {
+          setOrigText(item.origText);
+          setModText(item.modText);
+          setShowHistoryModal(false);
+          runDiff(item.origText, item.modText);
+        }}
+      />
 
       {/* Customize UI Modal */}
-      {showCustomizeModal && (
-        <div className="fixed right-4 top-4 bottom-4 w-full max-w-[450px] z-50 flex flex-col justify-center pointer-events-none">
-          <div className="bg-[#0A0A0C]/95 backdrop-blur-xl border border-[#334155] w-full max-h-[calc(100vh-32px)] overflow-hidden flex flex-col shadow-2xl rounded-xl pointer-events-auto animate-in slide-in-from-right duration-300">
-            <div className="flex justify-between items-center p-5 border-b border-[#334155] bg-[#0F172A]">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Palette className="w-5 h-5 text-[#6D28D9]" />
-                Appearance
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={randomizeCustomization}
-                  className="text-xs bg-[#1E293B] hover:bg-[#334155] border border-[#334155] px-2 py-1 rounded text-white font-bold flex items-center gap-1 transition-colors"
-                >
-                  <Dices className="w-3.5 h-3.5" />
-                  RANDOMIZE
-                </button>
-                <button
-                  onClick={() => setShowCustomizeModal(false)}
-                  className="text-[#94A3B8] hover:text-white transition-colors p-1"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
+      <CustomizeModal
+        isOpen={showCustomizeModal}
+        onClose={() => setShowCustomizeModal(false)}
+        appLayout={appLayout}
+        setAppLayout={setAppLayout}
+        syntaxTheme={syntaxTheme}
+        setSyntaxTheme={setSyntaxTheme}
+        uiFont={uiFont}
+        setUiFont={setUiFont}
+        uiRadius={uiRadius}
+        setUiRadius={setUiRadius}
+        uiTint={uiTint}
+        setUiTint={setUiTint}
+        uiFontSize={uiFontSize}
+        setUiFontSize={setUiFontSize}
+        uiTexture={uiTexture}
+        setUiTexture={setUiTexture}
+        uiMotion={uiMotion}
+        setUiMotion={setUiMotion}
+        uiGlass={uiGlass}
+        setUiGlass={setUiGlass}
+        uiSound={uiSound}
+        setUiSound={setUiSound}
+        customCSS={customCSS}
+        setCustomCSS={setCustomCSS}
+        customTheme={customTheme}
+        setCustomTheme={setCustomTheme}
+        playSound={playSound}
+      />
 
-            <div className="p-6 overflow-y-auto space-y-8 text-sm">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-b border-[#334155] pb-2">
-                  <h4 className="font-bold text-[#E2E8F0] flex items-center gap-2">
-                    <Layout className="w-4 h-4" /> Layout Mode
-                  </h4>
-                  <button
-                    onClick={() => setLockedLayout(!lockedLayout)}
-                    className={`p-1 rounded transition-colors ${lockedLayout ? "text-[#34D399] bg-[#064E3B]/30" : "text-[#64748B] hover:text-white"}`}
-                    title="Lock Layout during randomize"
-                  >
-                    {lockedLayout ? (
-                      <Lock className="w-4 h-4" />
-                    ) : (
-                      <Unlock className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    "standard",
-                    "fluid",
-                    "compact",
-                    "zen",
-                    "presentation",
-                    "terminal",
-                  ].map((l) => (
-                    <button
-                      key={l}
-                      onClick={() => setAppLayout(l as any)}
-                      className={`p-3 border rounded text-xs font-bold uppercase transition-colors ${appLayout === l ? "border-[#34D399] bg-[#064E3B]/20 text-[#34D399]" : "border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white"}`}
-                    >
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-b border-[#334155] pb-2">
-                  <h4 className="font-bold text-[#E2E8F0] flex items-center gap-2">
-                    <Palette className="w-4 h-4" /> Syntax Theme
-                  </h4>
-                  <button
-                    onClick={() => setLockedTheme(!lockedTheme)}
-                    className={`p-1 rounded transition-colors ${lockedTheme ? "text-[#34D399] bg-[#064E3B]/30" : "text-[#64748B] hover:text-white"}`}
-                    title="Lock Theme during randomize"
-                  >
-                    {lockedTheme ? (
-                      <Lock className="w-4 h-4" />
-                    ) : (
-                      <Unlock className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    "dark",
-                    "light",
-                    "high-contrast",
-                    "dracula",
-                    "hacker",
-                    "solarized-light",
-                    "oceanic",
-                    "custom",
-                  ].map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setSyntaxTheme(t as any)}
-                      className={`p-3 border rounded text-xs font-bold uppercase transition-colors ${syntaxTheme === t ? "border-[#F472B6] bg-[#831843]/20 text-[#F472B6]" : "border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white"}`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="font-bold text-[#E2E8F0] border-b border-[#334155] pb-2 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" /> Aesthetics & UI Styling
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">
-                        Platform Font
-                      </label>
-                      <button
-                        onClick={() => setLockedFont(!lockedFont)}
-                        className={`p-1 rounded transition-colors ${lockedFont ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
-                      >
-                        {lockedFont ? (
-                          <Lock className="w-3.5 h-3.5" />
-                        ) : (
-                          <Unlock className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {["sans", "mono", "serif", "dyslexic"].map((f) => (
-                        <button
-                          key={f}
-                          onClick={() => setUiFont(f as any)}
-                          className={`p-2 text-left text-xs border rounded ${uiFont === f ? "border-[#34D399] bg-[#064E3B]/20 text-[#34D399]" : "border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white"}`}
-                        >
-                          {f === "sans"
-                            ? "Inter (Sans)"
-                            : f === "mono"
-                              ? "Monospace"
-                              : f === "serif"
-                                ? "Georgia (Serif)"
-                                : "Dyslexic / Comic"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">
-                        Border Radius
-                      </label>
-                      <button
-                        onClick={() => setLockedRadius(!lockedRadius)}
-                        className={`p-1 rounded transition-colors ${lockedRadius ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
-                      >
-                        {lockedRadius ? (
-                          <Lock className="w-3.5 h-3.5" />
-                        ) : (
-                          <Unlock className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {["default", "none", "lg", "full"].map((r) => (
-                        <button
-                          key={r}
-                          onClick={() => setUiRadius(r as any)}
-                          className={`p-2 text-left text-xs border rounded ${uiRadius === r ? "border-[#34D399] bg-[#064E3B]/20 text-[#34D399]" : "border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white"}`}
-                        >
-                          {r === "default"
-                            ? "Standard (4px)"
-                            : r === "none"
-                              ? "Sharp (0px)"
-                              : r === "lg"
-                                ? "Rounded (12px)"
-                                : "Pill (Full)"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">
-                        Color Tint Overlay
-                      </label>
-                      <button
-                        onClick={() => setLockedTint(!lockedTint)}
-                        className={`p-1 rounded transition-colors ${lockedTint ? "text-[#34D399]" : "text-[#64748B] hover:text-white"}`}
-                      >
-                        {lockedTint ? (
-                          <Lock className="w-3.5 h-3.5" />
-                        ) : (
-                          <Unlock className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {[
-                        "default",
-                        "blue",
-                        "purple",
-                        "rose",
-                        "amber",
-                        "monochrome",
-                        "invert",
-                      ].map((t) => (
-                        <button
-                          key={t}
-                          onClick={() => setUiTint(t as any)}
-                          className={`p-2 text-left text-xs border rounded uppercase ${uiTint === t ? "border-[#34D399] bg-[#064E3B]/20 text-[#34D399]" : "border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white"}`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">Font Size</label>
-                    <div className="flex flex-col gap-2">
-                      {['sm', 'base', 'lg'].map(t => (
-                        <button key={t} onClick={() => setUiFontSize(t as any)} className={`p-2 text-left text-xs border rounded uppercase ${uiFontSize === t ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>
-                          {t === 'sm' ? 'Small' : t === 'lg' ? 'Large' : 'Normal'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">Background Texture</label>
-                    <div className="flex flex-col gap-2">
-                      {['none', 'dots', 'grid', 'noise'].map(t => (
-                        <button key={t} onClick={() => setUiTexture(t as any)} className={`p-2 text-left text-xs border rounded uppercase ${uiTexture === t ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">UI Sound</label>
-                    <div className="flex flex-col gap-2">
-                      {['disabled', 'enabled'].map(t => (
-                        <button key={t} onClick={() => setUiSound(t as any)} className={`p-2 text-left text-xs border rounded uppercase ${uiSound === t ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">Glassmorphism</label>
-                    <div className="flex flex-col gap-2">
-                      <button onClick={() => setUiGlass(false)} className={`p-2 text-left text-xs border rounded uppercase ${!uiGlass ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>Solid Panels</button>
-                      <button onClick={() => setUiGlass(true)} className={`p-2 text-left text-xs border rounded uppercase ${uiGlass ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>Frosted Glass</button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs text-[#94A3B8] uppercase tracking-widest font-bold">Animations</label>
-                    <div className="flex flex-col gap-2">
-                      {['default', 'reduced'].map(t => (
-                        <button key={t} onClick={() => setUiMotion(t as any)} className={`p-2 text-left text-xs border rounded uppercase ${uiMotion === t ? 'border-[#34D399] bg-[#064E3B]/20 text-[#34D399]' : 'border-[#334155] bg-[#111827] text-[#94A3B8] hover:border-[#94A3B8] hover:text-white'}`}>
-                          {t === 'default' ? 'Fluid (Springs)' : 'Reduced Motion'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-4 bg-[#020617] border border-[#334155] rounded-xl p-4 mt-6">
-                  <h4 className="font-bold text-[#E2E8F0] border-b border-[#334155] pb-2">
-                    Custom CSS Injector
-                  </h4>
-                  <textarea
-                    value={customCSS}
-                    onChange={(e) => setCustomCSS(e.target.value)}
-                    placeholder="/* Write arbitrary CSS here... e.g. body { background: red; } */"
-                    className="w-full h-32 bg-[#0F172A] border border-[#334155] rounded-md p-3 text-sm text-white font-mono focus:outline-none focus:border-[#34D399]"
-                  />
-                </div>
-
-              {syntaxTheme === 'custom' && (
-                <div className="space-y-4 bg-[#020617] border border-[#334155] rounded-xl p-4 mt-6">
-                  <h4 className="font-bold text-[#E2E8F0] border-b border-[#334155] pb-2">
-                    Custom Theme Builder
-                  </h4>
-                  <div className="flex gap-2">
-                    <button onClick={() => {
-                      // simple random hex color palette generator
-                      const randomColor = () => '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-                      setCustomTheme({
-                        bg: randomColor(),
-                        fg: randomColor(),
-                        comment: randomColor(),
-                        string: randomColor(),
-                        keyword: randomColor(),
-                        number: randomColor(),
-                        function: randomColor(),
-                        operator: randomColor()
-                      });
-                      playSound('click');
-                    }} className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] rounded text-white text-xs font-bold hover:bg-[#334155] flex items-center gap-2">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      AUTO-GENERATE PALETTE
-                    </button>
-                    <button onClick={() => {
-                      setCustomTheme({ bg: '#020617', fg: '#E2E8F0', comment: '#64748B', string: '#A7F3D0', keyword: '#F472B6', number: '#C084FC', function: '#60A5FA', operator: '#475569' });
-                      playSound('click');
-                    }} className="px-3 py-1.5 bg-[#1E293B] border border-[#334155] rounded text-white text-xs font-bold hover:bg-[#334155]">
-                      RESET
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
-                    {Object.entries(customTheme).map(([key, value]) => (
-                      <div key={key} className="flex flex-col gap-1">
-                        <span className="uppercase text-[#94A3B8]">{key}</span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={value}
-                            onChange={(e) =>
-                              setCustomTheme((prev) => ({
-                                ...prev,
-                                [key]: e.target.value,
-                              }))
-                            }
-                            className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0"
-                          />
-                          <input
-                            type="text"
-                            value={value}
-                            onChange={(e) =>
-                              setCustomTheme((prev) => ({
-                                ...prev,
-                                [key]: e.target.value,
-                              }))
-                            }
-                            className="bg-[#0F172A] border border-[#334155] rounded text-white w-full px-2 py-1 outline-none focus:border-[#6D28D9]"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <h4 className="font-bold text-[#E2E8F0] border-b border-[#334155] pb-2 flex items-center gap-2">
-                  <Share className="w-4 h-4" /> Export & Import
-                </h4>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={getShareCode()}
-                    className="flex-1 bg-[#111827] border border-[#334155] rounded px-3 py-2 text-xs font-mono text-[#94A3B8] focus:outline-none"
-                    onClick={(e) => {
-                      (e.target as HTMLInputElement).select();
-                      navigator.clipboard.writeText(getShareCode());
-                    }}
-                    title="Click to copy your share code"
-                  />
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(getShareCode());
-                      alert("Share code copied to clipboard!");
-                    }}
-                    className="px-4 border border-[#334155] bg-[#1E293B] hover:bg-[#334155] transition-colors rounded text-xs font-bold"
-                  >
-                    COPY
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={shareCodeInput}
-                    onChange={(e) => setShareCodeInput(e.target.value)}
-                    placeholder="Paste a share code here..."
-                    className="flex-1 bg-[#111827] border border-[#334155] rounded px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-[#6D28D9]"
-                  />
-                  <button
-                    onClick={importShareCode}
-                    disabled={!shareCodeInput}
-                    className="px-4 border border-[#6D28D9] bg-[#4C1D95] text-[#C4B5FD] hover:bg-[#6D28D9] transition-colors rounded text-xs font-bold disabled:opacity-50"
-                  >
-                    IMPORT
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="font-bold text-[#E2E8F0] border-b border-[#334155] pb-2 flex items-center gap-2">
-                  <Save className="w-4 h-4" /> Saved Presets
-                </h4>
-                {savedPresets.length === 0 ? (
-                  <p className="text-[#64748B] text-xs italic">
-                    No presets saved yet. Customize your layout and theme, then
-                    save it!
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {savedPresets.map((p, i) => (
-                      <div
-                        key={i}
-                        className="flex justify-between items-center bg-[#111827] border border-[#334155] rounded p-3"
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#E2E8F0]">
-                            {p.name}
-                          </span>
-                          <span className="text-[10px] uppercase text-[#64748B]">
-                            {p.config.appLayout} • {p.config.syntaxTheme} •{" "}
-                            {p.config.uiTint} tint
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => loadPreset(p)}
-                            className="px-2 py-1 bg-[#1E293B] hover:bg-[#334155] text-xs rounded transition-colors text-white"
-                          >
-                            LOAD
-                          </button>
-                          <button
-                            onClick={() => {
-                              const newPresets = savedPresets.filter(
-                                (_, idx) => idx !== i,
-                              );
-                              setSavedPresets(newPresets);
-                              safeSetItem(
-                                "tds_presets",
-                                JSON.stringify(newPresets),
-                              );
-                            }}
-                            className="p-1 hover:bg-[#EF4444]/20 text-[#EF4444] rounded transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2 w-full">
-                  <input
-                    type="text"
-                    value={presetNameInput}
-                    onChange={(e) => setPresetNameInput(e.target.value)}
-                    placeholder="Enter preset name..."
-                    className="flex-1 bg-[#111827] border border-[#334155] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6D28D9]"
-                  />
-                  <button
-                    onClick={savePreset}
-                    disabled={!presetNameInput.trim()}
-                    className="px-4 py-2 border border-[#334155] bg-[#1E293B] hover:bg-[#334155] transition-colors rounded text-xs font-bold flex items-center justify-center gap-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Save className="w-4 h-4" />
-                    SAVE
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Help Modal */}
       {showFolderDiff && (
         <Suspense fallback={<PanelFallback label="folder comparison" />}>
           <FolderDiff
@@ -3749,6 +2728,19 @@ Date: ${new Date().toLocaleString()}
 
       {showHelpModal && (
         <ShortcutsModal onClose={() => setShowHelpModal(false)} />
+      )}
+
+      {showCloudSyncModal && (
+        <CloudSyncModal
+          onClose={() => setShowCloudSyncModal(false)}
+          origText={origText}
+          setOrigText={setOrigText}
+          modText={modText}
+          setModText={setModText}
+          baseText={baseText}
+          setBaseText={setBaseText}
+          onDiff={(orig, mod) => runDiff(orig, mod)}
+        />
       )}
     </div>
   );

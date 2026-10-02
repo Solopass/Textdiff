@@ -9,9 +9,19 @@ interface Props {
   setModText: (t: string) => void;
   baseText: string;
   setBaseText: (t: string) => void;
+  onDiff?: (orig: string, mod: string) => void;
 }
 
-export const CloudSyncModal: React.FC<Props> = ({ onClose, origText, setOrigText, modText, setModText, baseText, setBaseText }) => {
+export const CloudSyncModal: React.FC<Props> = ({
+  onClose,
+  origText,
+  setOrigText,
+  modText,
+  setModText,
+  baseText,
+  setBaseText,
+  onDiff,
+}) => {
   const [provider, setProvider] = useState<'github' | 'dropbox' | 'drive'>('github');
   const [token, setToken] = useState(() => localStorage.getItem('tds_github_token') || '');
   const [loading, setLoading] = useState(false);
@@ -74,9 +84,15 @@ export const CloudSyncModal: React.FC<Props> = ({ onClose, origText, setOrigText
       if (!response.ok) throw new Error('Failed to fetch Gist. It might be private and require a token.');
       const data = await response.json();
       
-      if (data.files['original.txt']) setOrigText(data.files['original.txt'].content);
-      if (data.files['modified.txt']) setModText(data.files['modified.txt'].content);
+      const newOrig = data.files['original.txt'] ? data.files['original.txt'].content : origText;
+      const newMod = data.files['modified.txt'] ? data.files['modified.txt'].content : modText;
+      if (data.files['original.txt']) setOrigText(newOrig);
+      if (data.files['modified.txt']) setModText(newMod);
       if (data.files['base.txt']) setBaseText(data.files['base.txt'].content);
+
+      if (onDiff && (data.files['original.txt'] || data.files['modified.txt'])) {
+        onDiff(newOrig, newMod);
+      }
       
       setSuccess('Gist imported successfully!');
     } catch (err: any) {

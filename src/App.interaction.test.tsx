@@ -189,3 +189,20 @@ describe("view modes", () => {
     await waitFor(() => expect(screen.getByText(/UNIFIED_VIEW/)).toBeInTheDocument());
   });
 });
+
+describe("cloud sync", () => {
+  it("opens and closes the Gist cloud sync modal", async () => {
+    const user = userEvent.setup();
+    await openStudio(user);
+
+    expect(screen.queryByRole("dialog", { name: /cloud sync/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /gist/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /cloud sync/i });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText(/GITHUB GISTS/i)).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /cloud sync/i })).not.toBeInTheDocument();
+  });
+});

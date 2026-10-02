@@ -213,18 +213,12 @@ from moving focus behind an open dialog, and no test would catch a regression.
 
 ---
 
-## 3. Delete or wire up `CloudSyncModal`
+## 3. Wire up `CloudSyncModal` (Done)
 
-Five minutes. `src/components/CloudSyncModal.tsx` is imported by `App.tsx` and
-never rendered — it was dead before this round of work and still is. Either give
-it a trigger or delete the file and its import. Right now it's just misleading.
-
-Verify:
-
-```powershell
-npm run typecheck
-npm test
-```
+`src/components/CloudSyncModal.tsx` is now wired to state in `App.tsx`, with a
+dedicated toolbar button ("GIST"), command palette entry ("Sync with GitHub Gist"),
+Escape key listener integration, and an `onDiff` callback to automatically compare
+imported gists. Tested and verified in the test suite.
 
 ---
 

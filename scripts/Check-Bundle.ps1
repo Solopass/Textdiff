@@ -57,14 +57,16 @@ function Get-GzipSize {
     $bytes  = [System.IO.File]::ReadAllBytes($Path)
     $buffer = [System.IO.MemoryStream]::new()
     $gzip   = [System.IO.Compression.GZipStream]::new(
-        $buffer, [System.IO.Compression.CompressionLevel]::Optimal)
+        $buffer, [System.IO.Compression.CompressionLevel]::Optimal, $true)
     try {
         $gzip.Write($bytes, 0, $bytes.Length)
     }
     finally {
         $gzip.Dispose()
     }
-    $buffer.Length
+    $length = $buffer.Length
+    $buffer.Dispose()
+    return $length
 }
 
 $rows = foreach ($asset in $assets) {
@@ -86,11 +88,12 @@ Write-Host "something heavy stopped being lazy.`n" -ForegroundColor DarkGray
 
 # Heavy dependencies that must never appear in the first-paint set. Matched
 # against chunk *contents*, since Rollup's hashed filenames reveal nothing.
+# Patterns match implementation tokens rather than dynamic import specifiers.
 $mustBeLazy = @{
-    'firebase'     = 'firebase'
-    'jspdf'        = 'jsPDF'
-    'html2canvas'  = 'html2canvas'
-    'socket.io'    = 'socket.io'
+    'firebase'     = 'initializeFirestore'
+    'jspdf'        = 'jsPDF.API'
+    'html2canvas'  = 'html2canvas.hertzen.com'
+    'socket.io'    = 'socket.io-client'
 }
 
 $leaked = @()
