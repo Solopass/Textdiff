@@ -37,6 +37,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$DistPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DistPath)
 $indexPath = Join-Path $DistPath 'index.html'
 if (-not (Test-Path $indexPath)) {
     Write-Error "No build found at '$indexPath'. Run 'npm run build:web' first."
@@ -54,9 +55,10 @@ if (-not $assets) {
 function Get-GzipSize {
     param([string] $Path)
 
-    $bytes  = [System.IO.File]::ReadAllBytes($Path)
-    $buffer = [System.IO.MemoryStream]::new()
-    $gzip   = [System.IO.Compression.GZipStream]::new(
+    $resolved = (Get-Item $Path).FullName
+    $bytes    = [System.IO.File]::ReadAllBytes($resolved)
+    $buffer   = [System.IO.MemoryStream]::new()
+    $gzip     = [System.IO.Compression.GZipStream]::new(
         $buffer, [System.IO.Compression.CompressionLevel]::Optimal, $true)
     try {
         $gzip.Write($bytes, 0, $bytes.Length)
