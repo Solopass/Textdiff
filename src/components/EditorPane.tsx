@@ -5,7 +5,42 @@
  * why Monaco itself can't run in jsdom.
  */
 import { useEffect } from "react";
-import Editor, { useMonaco } from "@monaco-editor/react";
+import Editor, { useMonaco, loader } from "@monaco-editor/react";
+
+// Self-host Monaco by configuring the loader dynamically in browser context.
+// Loading monaco-editor and its web workers via dynamic import ensures that Monaco
+// stays in a lazy chunk and is not bundled into the first-paint bundle.
+if (typeof window !== "undefined") {
+  Promise.all([
+    import("monaco-editor"),
+    import("monaco-editor/editor/editor.worker?worker"),
+    import("monaco-editor/language/json/json.worker?worker"),
+    import("monaco-editor/language/css/css.worker?worker"),
+    import("monaco-editor/language/html/html.worker?worker"),
+    import("monaco-editor/language/typescript/ts.worker?worker"),
+  ]).then(([monaco, editorWorker, jsonWorker, cssWorker, htmlWorker, tsWorker]) => {
+    (window as any).MonacoEnvironment = {
+      getWorker(_: any, label: string) {
+        if (label === "json") {
+          return new jsonWorker.default();
+        }
+        if (label === "css" || label === "scss" || label === "less") {
+          return new cssWorker.default();
+        }
+        if (label === "html" || label === "handlebars" || label === "razor") {
+          return new htmlWorker.default();
+        }
+        if (label === "typescript" || label === "javascript") {
+          return new tsWorker.default();
+        }
+        return new editorWorker.default();
+      },
+    };
+    loader.config({ monaco });
+  }).catch((err) => {
+    console.error("Failed to initialize self-hosted Monaco editor:", err);
+  });
+}
 
 export const TextAreaWithLineNumbers = ({
   value,

@@ -9,19 +9,14 @@
       set response headers, so this goes in a meta tag instead.
 
       Why each source is here:
-        script-src  jsdelivr — Monaco is loaded from the CDN by
-                    @monaco-editor/react, which injects its AMD loader as a
-                    <script> and then pulls further modules. Its web workers
-                    are blob shims that importScripts() back to the CDN, and
-                    importScripts is checked against script-src too.
+        script-src  'self' 'unsafe-inline' — application and web workers are bundled locally;
+                    inline script for initialization. Monaco is fully self-hosted.
         style-src   'unsafe-inline' — Tailwind v4 and Monaco both inject
                     styles at runtime, and the custom-CSS feature writes a
                     <style> element.
-        font-src    jsdelivr — Monaco's codicon icon font.
-        connect-src googleapis — Firestore; api.github.com — repo/Gist
-                    integration; jsdelivr — Monaco module fetches.
-        worker-src  blob: — Monaco's cross-origin worker shim. The app's own
-                    diff worker is same-origin.
+        font-src    'self' data: — locally bundled fonts and Monaco's codicon data URIs.
+        connect-src googleapis / firebaseio — Firestore; api.github.com — repo/Gist integration.
+        worker-src  'self' blob: — self-hosted Monaco workers and app's diff worker.
 
       Deliberately NOT granting 'unsafe-eval': verified that no bundled
       dependency calls global eval() or new Function().
@@ -35,12 +30,12 @@
       http-equiv="Content-Security-Policy"
       content="
         default-src 'self';
-        script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-        style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-        font-src 'self' data: https://cdn.jsdelivr.net;
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline';
+        font-src 'self' data:;
         img-src 'self' data: blob:;
         worker-src 'self' blob:;
-        connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://api.github.com https://cdn.jsdelivr.net;
+        connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://api.github.com;
         base-uri 'self';
         form-action 'self';
       "

@@ -85,3 +85,7 @@ class ResizeObserver {
 });
 
 (Element.prototype as any).scrollIntoView = () => {};
+
+if (typeof document !== 'undefined' && !(document as any).queryCommandSupported) {
+  (document as any).queryCommandSupported = () => false;
+}

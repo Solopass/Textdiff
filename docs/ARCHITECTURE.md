@@ -181,11 +181,11 @@ html2canvas and socket.io do not.
 
 Set via `<meta>` in `index.html` because GitHub Pages can't set response headers.
 
-Monaco is the constraint. `@monaco-editor/react` loads it from
-`cdn.jsdelivr.net`: it injects an AMD loader as a `<script>`, pulls further
-modules, and spawns blob-URL workers that `importScripts()` back to the CDN —
-which is checked against `script-src`, not `worker-src`. That's why jsdelivr
-appears in `script-src`, `style-src`, `font-src` and `connect-src`.
+Monaco is fully self-hosted (`monaco-editor` 0.56.0). The editor and its language
+web workers (`editor`, `json`, `css`, `html`, `ts`) are bundled locally with dynamic
+import chunking, completely eliminating the previous runtime dependency on `cdn.jsdelivr.net`.
+As a result, `jsdelivr` has been stripped from `script-src`, `style-src`, `font-src`,
+and `connect-src`.
 
 `'unsafe-inline'` is required in `style-src` (Tailwind v4 and Monaco inject
 styles at runtime; the custom-CSS feature writes a `<style>` element).

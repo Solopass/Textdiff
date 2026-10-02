@@ -115,16 +115,15 @@ to the cleanup query, and never expire. Delete them once by hand if you care.
 
 ---
 
-## 1. Self-host Monaco
+## 1. Self-host Monaco [COMPLETED]
 
-**Why this is first.** Monaco currently loads from `cdn.jsdelivr.net` at
-runtime. If that CDN is blocked — corporate proxy, region, or an outage — the
-editors never load and the app is unusable. Self-hosting also lets you delete
-jsdelivr from four CSP directives, which is the most complicated part of that
-policy and the thing most likely to break on a future change.
+**Completed:** Monaco Editor 0.56.0 is explicitly installed and bundled locally with its
+5 web workers (`editor`, `json`, `css`, `html`, `ts`). Configured dynamic import chunking
+so Monaco is only fetched when the editor initializes, maintaining first-paint bundle size
+at ~135 KB gzipped. `jsdelivr` was removed from `script-src`, `style-src`, `font-src`,
+and `connect-src` in `index.html`.
 
-**Cost.** Monaco is large. Expect the initial download to grow unless you keep
-it lazy. Measure before and after.
+---
 
 ### Steps
 

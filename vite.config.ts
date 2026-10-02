@@ -30,8 +30,13 @@ export default defineConfig(() => {
           // action-triggered dependencies (firebase, jspdf, html2canvas,
           // socket.io) alone so they stay async.
           manualChunks(id) {
-            if (!id.includes('node_modules')) return;
-            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) {
+            const normalized = id.replace(/\\/g, '/');
+            if (!normalized.includes('/node_modules/')) return;
+            if (
+              normalized.includes('/node_modules/react/') ||
+              normalized.includes('/node_modules/react-dom/') ||
+              normalized.includes('/node_modules/scheduler/')
+            ) {
               return 'vendor-react';
             }
           },
