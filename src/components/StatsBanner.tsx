@@ -17,6 +17,7 @@ export interface DiffStatsProps {
 interface Props {
   stats: DiffStatsProps;
   onCopyReport: () => void;
+  onCopyPatch?: () => void;
   onExportPatch: () => void;
   onExportCsv: () => void;
   onExportMd: () => void;
@@ -32,6 +33,7 @@ interface Props {
 export const StatsBanner: React.FC<Props> = ({
   stats,
   onCopyReport,
+  onCopyPatch,
   onExportPatch,
   onExportCsv,
   onExportMd,
@@ -87,6 +89,15 @@ export const StatsBanner: React.FC<Props> = ({
           >
             COPY_REPORT
           </button>
+          {onCopyPatch && (
+            <button
+              onClick={onCopyPatch}
+              className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono"
+              title="Copy Unified Diff Patch to clipboard"
+            >
+              COPY_PATCH
+            </button>
+          )}
           <button
             onClick={onExportPatch}
             className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors text-xs font-mono flex items-center gap-2"

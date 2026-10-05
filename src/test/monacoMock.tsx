@@ -14,15 +14,29 @@
  *
  *   vi.mock("@monaco-editor/react", async () => await import("./test/monacoMock"));
  */
-import type React from "react";
+import React, { useEffect } from "react";
 
 type EditorProps = {
   value?: string;
   onChange?: (value: string | undefined) => void;
   language?: string;
+  onMount?: (editor: any, monaco: any) => void;
 };
 
-export default function Editor({ value = "", onChange, language }: EditorProps) {
+export default function Editor({ value = "", onChange, language, onMount }: EditorProps) {
+  useEffect(() => {
+    if (onMount) {
+      onMount(
+        {
+          setScrollTop: () => {},
+          setScrollLeft: () => {},
+          onDidScrollChange: () => ({ dispose: () => {} }),
+        },
+        null,
+      );
+    }
+  }, [onMount]);
+
   return (
     <textarea
       data-testid="monaco-editor"

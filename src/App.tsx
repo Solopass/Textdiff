@@ -110,6 +110,7 @@ import {
   highlightCode,
   renderSearchHighlights,
   exportHighlightedHtml,
+  detectLanguageFromFilename,
 } from "./lib/highlight";
 import { TextAreaWithLineNumbers } from "./components/EditorPane";
 import { ShortcutsModal } from "./components/ShortcutsModal";
@@ -302,6 +303,8 @@ export default function App() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const isSyncingRef = useRef(false);
+  const editorOrigRef = useRef<any>(null);
+  const editorModRef = useRef<any>(null);
 
   const handleAIResolveConflict = async () => {
     if (!gitConflictText.trim()) return;
@@ -360,12 +363,27 @@ export default function App() {
   };
 
   const handleSyncScroll = (
-    e: React.UIEvent<HTMLTextAreaElement>,
+    e: any,
     source: "orig" | "mod",
   ) => {
     if (isSyncingRef.current) return;
 
-    const isMobile = e.currentTarget.id.includes("-mobile");
+    // First try syncing Monaco editor instances directly
+    const targetEditor = source === "orig" ? editorModRef.current : editorOrigRef.current;
+    if (targetEditor && typeof targetEditor.setScrollTop === "function") {
+      isSyncingRef.current = true;
+      targetEditor.setScrollTop(e.currentTarget.scrollTop);
+      targetEditor.setScrollLeft(e.currentTarget.scrollLeft);
+
+      window.requestAnimationFrame(() => {
+        isSyncingRef.current = false;
+      });
+      return;
+    }
+
+    // Fallback for DOM textarea (e.g. test environment)
+    const currentId = e.currentTarget?.id || "";
+    const isMobile = currentId.includes("-mobile");
     const targetId =
       source === "orig"
         ? `textarea-mod${isMobile ? "-mobile" : "-desk"}`
@@ -842,6 +860,10 @@ export default function App() {
       const text = await readTextFile(file);
       setTarget(text);
       setName(file.name);
+      const detected = detectLanguageFromFilename(file.name);
+      if (detected) {
+        setLanguage(detected);
+      }
       playSound("success");
     } catch (err: any) {
       setDiffError(err?.message || "Could not read that file.");
@@ -875,6 +897,10 @@ export default function App() {
     if (files.length >= 2) {
       loadFileInto(files[0], setOrigText, setFileNameA);
       loadFileInto(files[1], setModText, setFileNameB);
+      const detected =
+        detectLanguageFromFilename(files[0].name) ||
+        detectLanguageFromFilename(files[1].name);
+      if (detected) setLanguage(detected);
       return;
     }
     loadFileInto(files[0], setTarget, setName);
@@ -1270,6 +1296,13 @@ Date: ${new Date().toLocaleString()}
     });
   };
 
+  const handleCopyPatch = () => {
+    if (!diffResult) return;
+    navigator.clipboard.writeText(generatePatchReport(diffResult)).then(() => {
+      alert("Unified patch copied to clipboard!");
+    });
+  };
+
   const exportPatchReport = () => {
     if (!diffResult) return;
     downloadFile("diff.patch", generatePatchReport(diffResult), "text/plain");
@@ -1445,6 +1478,38 @@ Date: ${new Date().toLocaleString()}
       title: trimBlankLines ? "Keep blank lines" : "Trim blank lines",
       group: "Filters",
       run: () => setTrimBlankLines(!trimBlankLines),
+    },
+    {
+      id: "copy-patch",
+      title: "Copy Git patch to clipboard",
+      group: "Export",
+      keywords: "unified diff patch copy clip clipboard",
+      disabled: !diffResult,
+      run: handleCopyPatch,
+    },
+    {
+      id: "export-patch",
+      title: "Export as Git patch (.patch)",
+      group: "Export",
+      keywords: "unified diff patch download file",
+      disabled: !diffResult,
+      run: exportPatchReport,
+    },
+    {
+      id: "export-csv",
+      title: "Export report as CSV (.csv)",
+      group: "Export",
+      keywords: "spreadsheet data comma separated",
+      disabled: !diffResult,
+      run: exportCsvReport,
+    },
+    {
+      id: "export-md",
+      title: "Export report as Markdown (.md)",
+      group: "Export",
+      keywords: "markdown summary report doc",
+      disabled: !diffResult,
+      run: exportMdReport,
     },
     {
       id: "export-html",
@@ -1757,6 +1822,7 @@ Date: ${new Date().toLocaleString()}
                 </div>
               </div>
               <TextAreaWithLineNumbers
+                editorRef={editorOrigRef}
                 customTheme={customTheme}
                 id="textarea-orig-desk"
                 value={origText}
@@ -1845,6 +1911,7 @@ Date: ${new Date().toLocaleString()}
                 </div>
               </div>
               <TextAreaWithLineNumbers
+                editorRef={editorModRef}
                 customTheme={customTheme}
                 id="textarea-mod-desk"
                 value={modText}
@@ -2086,6 +2153,7 @@ Date: ${new Date().toLocaleString()}
             <StatsBanner
               stats={stats}
               onCopyReport={handleCopyReport}
+              onCopyPatch={handleCopyPatch}
               onExportPatch={exportPatchReport}
               onExportCsv={exportCsvReport}
               onExportMd={exportMdReport}

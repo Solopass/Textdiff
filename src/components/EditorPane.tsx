@@ -53,6 +53,7 @@ export const TextAreaWithLineNumbers = ({
   language = "javascript",
   wordWrap = false,
   customTheme,
+  editorRef,
 }: any) => {
   const monaco = useMonaco();
 
@@ -171,6 +172,23 @@ export const TextAreaWithLineNumbers = ({
         theme={getMonacoTheme()}
         value={value}
         onChange={(val) => onChange(val || "")}
+        onMount={(editor) => {
+          if (editorRef) {
+            if (typeof editorRef === "function") editorRef(editor);
+            else editorRef.current = editor;
+          }
+          if (onScroll) {
+            editor.onDidScrollChange((e: any) => {
+              onScroll({
+                currentTarget: {
+                  id: id || "",
+                  scrollTop: e.scrollTop,
+                  scrollLeft: e.scrollLeft,
+                },
+              });
+            });
+          }
+        }}
         options={{
           wordWrap: wordWrap ? "on" : "off",
           lineNumbers: showLineNums ? "on" : "off",

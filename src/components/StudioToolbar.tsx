@@ -326,11 +326,19 @@ export const StudioToolbar: React.FC<Props> = ({
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
+          aria-label="Code language for syntax highlighting"
           className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#E2E8F0] hover:bg-[#334155] transition-colors outline-none cursor-pointer"
         >
           <option value="javascript">JAVASCRIPT</option>
+          <option value="typescript">TYPESCRIPT</option>
           <option value="python">PYTHON</option>
           <option value="json">JSON</option>
+          <option value="html">HTML</option>
+          <option value="css">CSS</option>
+          <option value="markdown">MARKDOWN</option>
+          <option value="sql">SQL</option>
+          <option value="shell">SHELL / BASH</option>
+          <option value="yaml">YAML</option>
           <option value="plain">PLAIN TEXT</option>
         </select>
         <button

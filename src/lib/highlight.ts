@@ -11,6 +11,74 @@ import "prismjs/components/prism-javascript";
 import "prismjs/components/prism-typescript";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-json";
+import "prismjs/components/prism-css";
+import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-sql";
+import "prismjs/components/prism-bash";
+import "prismjs/components/prism-yaml";
+
+const PRISM_LANGUAGE_ALIASES: Record<string, string> = {
+  shell: "bash",
+  sh: "bash",
+  html: "markup",
+  xml: "markup",
+  yml: "yaml",
+  ts: "typescript",
+  js: "javascript",
+  py: "python",
+};
+
+/**
+ * Infer supported language identifier from a file extension or filename.
+ */
+export function detectLanguageFromFilename(filename: string): string | null {
+  if (!filename) return null;
+  const dotIndex = filename.lastIndexOf(".");
+  if (dotIndex === -1) return null;
+  const ext = filename.slice(dotIndex + 1).toLowerCase();
+
+  switch (ext) {
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "javascript";
+    case "ts":
+    case "tsx":
+    case "mts":
+    case "cts":
+      return "typescript";
+    case "py":
+    case "pyw":
+      return "python";
+    case "json":
+      return "json";
+    case "html":
+    case "htm":
+      return "html";
+    case "css":
+    case "scss":
+    case "less":
+      return "css";
+    case "md":
+    case "markdown":
+      return "markdown";
+    case "sql":
+      return "sql";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell";
+    case "yml":
+    case "yaml":
+      return "yaml";
+    case "txt":
+    case "log":
+      return "plain";
+    default:
+      return null;
+  }
+}
 
 export function highlightCode(
   text: string,
@@ -28,7 +96,8 @@ export function highlightCode(
   if (!text) return "";
 
   if (language === "plain") return escapeHtml(text);
-  let lang = language;
+  const mapped = PRISM_LANGUAGE_ALIASES[language] || language;
+  let lang = mapped;
   if (!Prism.languages[lang]) lang = "javascript";
 
   const getThemeClasses = (type: string) => {
