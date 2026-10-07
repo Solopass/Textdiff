@@ -21,7 +21,12 @@ index.html          CSP, SEO/social meta, service worker registration
               │     ├── sanitize.ts    escapeHtml, sanitizeCustomCss
               │     ├── storage.ts     safeSetItem
               │     ├── constants.ts   feature flags, share TTL
-              │     └── types.ts       shared type re-exports
+              │     ├── monacoSetup.ts self-hosted Monaco bootstrap (ensureMonaco)
+              │     ├── types.ts       shared type re-exports
+              │     └── crypto/
+              │           ├── encoding.ts   base64url / utf8 helpers
+              │           ├── symmetric.ts  AES-256-GCM share encryption (free tier)
+              │           └── license.ts    offline Ed25519 Pro licence check
               └── components/
                     ├── EditorPane.tsx       Monaco wrapper
                     ├── SplitDiffView.tsx    Side-by-side virtualized diff table & inline editing
@@ -33,6 +38,9 @@ index.html          CSP, SEO/social meta, service worker registration
                     ├── CloudSyncModal.tsx   GitHub Gist import/export sync tool
                     ├── GitConflictModal.tsx 3-way merge conflict resolver
                     ├── HistoryModal.tsx     diff snapshot history manager
+                    ├── ShareModal.tsx       share options: encrypted / password / open, burn
+                    ├── UnlockShareModal.tsx password prompt for protected shares
+                    ├── ProActivationModal.tsx tier table + licence activation
                     ├── CustomizeModal.tsx   theme, typography & custom CSS modal
                     ├── FolderDiff.tsx       folder/ZIP comparison (+ compare, stripRoot)
                     ├── GitHubIntegration.tsx
@@ -41,6 +49,7 @@ index.html          CSP, SEO/social meta, service worker registration
                     └── LandingPage.tsx
 scripts/
   ├── cleanup-expired-shares.mjs   deletes expired share documents (Admin SDK)
+  ├── issue-license.ts             mints Pro licence keys (bun; needs the private key)
   ├── Check-Bundle.ps1             verifies lazy chunks & bundle size constraints
   └── smoke-built-app.mjs          verifies built production HTML/JS loads cleanly
 server.ts           Express + Socket.IO + Gemini proxy. NOT deployed to Pages.
@@ -218,6 +227,17 @@ import chunking, completely eliminating the previous runtime dependency on `cdn.
 As a result, `jsdelivr` has been stripped from `script-src`, `style-src`, `font-src`,
 and `connect-src`.
 
+> **Ordering matters.** `@monaco-editor/react` still defaults to the CDN: the
+> moment an `<Editor>` mounts or `useMonaco()` runs, it fetches Monaco from
+> jsdelivr unless `loader.config({ monaco })` has *already* been called. The
+> first self-hosting attempt called it from an un-awaited module-scope promise,
+> so the editor always won the race, the CSP blocked the CDN script, and every
+> editor sat on "Loading..." forever — with all tests green, because jsdom uses
+> a textarea mock. `EditorPane` now renders nothing Monaco-related until
+> `ensureMonaco()` (in `lib/monacoSetup.ts`) resolves. The Vite *dev* server can
+> still show the CDN request (its dependency optimiser may create a second
+> loader instance); check the production build with `npm run preview`.
+
 `'unsafe-inline'` is required in `style-src` (Tailwind v4 and Monaco inject
 styles at runtime; the custom-CSS feature writes a `<style>` element).
 `'unsafe-eval'` is deliberately **not** granted — no bundled dependency calls
@@ -231,7 +251,9 @@ means a host that can set them.
 ## Client-side storage
 
 All under a `tds_` prefix in `localStorage`: `tds_origText`, `tds_modText`,
-`tds_config`, `tds_history`, `tds_presets`, `tds_github_token`.
+`tds_config`, `tds_history`, `tds_presets`, `tds_github_token`,
+`tds_pro_license` (the raw signed token — re-verified on every load, so editing
+it by hand unlocks nothing).
 
 Two rules:
 
@@ -245,12 +267,28 @@ Two rules:
 
 ## Sharing
 
-Two paths:
+`ShareModal` offers three protections; all go through `createShare` in `App.tsx`:
 
-- **URL fragment** — `lz-string` compresses the payload into the hash. Entirely
-  client-side; the data never leaves the browser.
-- **Firestore** — writes `{ data, timestamp, expiresAt }` to the `diffs`
-  collection and puts the document id in `?id=`.
+- **Encrypted link** (default) — `data` is `tdsenc1:{envelope}` from
+  `encryptWithLinkKey`; the URL is `?id=<doc>#key=<base64url>`.
+- **Password** — `encryptWithPassphrase` (PBKDF2 → AES-GCM). Opening the link
+  shows `UnlockShareModal`; nothing is decrypted until the password is right.
+- **Open** — the old plaintext JSON in `data`. Only this mode falls back to the
+  `lz-string` URL-fragment link when Firestore is unreachable; encrypted modes
+  error instead of silently downgrading.
+
+Firestore writes `{ data, timestamp, expiresAt, burnAfterReading? }` to the
+`diffs` collection. The read path tells plaintext from ciphertext by the
+`tdsenc1:` prefix (plain payloads are JSON and start with `{`), so links
+created before encryption shipped still open.
+
+**Burn after reading** (Pro) sets `burnAfterReading: true`. The reader's client
+deletes the document *after* a successful decrypt, so a mistyped password
+doesn't destroy it. The load effect is guarded by a ref because StrictMode runs
+effects twice in development, and a second fetch would race the delete.
+
+The share dialogs and `lib/crypto/symmetric.ts` are lazy (`React.lazy` /
+`import()`); they cost nothing on first paint.
 
 ### Expiry
 
@@ -293,7 +331,7 @@ Users can double-click any cell in Split or Unified diff views to edit text dire
 
 ## Testing
 
-`npm test` (Vitest + jsdom). 98 tests across 12 test suites.
+`npm test` (Vitest + jsdom). 129 tests across 18 test suites.
 
 **Unit — pure logic:**
 
@@ -318,6 +356,14 @@ Users can double-click any cell in Split or Unified diff views to edit text dire
   modal keyboard accessibility across all dialogs.
 - `src/inlineDiffEdit.test.tsx` — double-click inline cell editing, saving modifications,
   and cancelling in both Split and Unified diff views.
+- `src/encryptedShare.test.tsx` — opening link-key and password shares, wrong
+  password, cut-off fragment, burn-after-reading only after decrypt, and that a
+  created share stores ciphertext only. Real WebCrypto, mocked Firestore.
+
+**Unit — crypto:** `src/lib/crypto/symmetric.test.ts` (round trips, wrong
+key/password, tampering, envelope format) and `src/lib/crypto/license.test.ts`
+(genuine, forged, tampered, expired and malformed licences, each against a
+throwaway key — tests never touch the real release key).
 
 ### Two substitutions make this possible
 

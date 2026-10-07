@@ -7,3 +7,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Licence signing keys must never be committed
+*.jwk
+*.pem

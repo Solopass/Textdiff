@@ -20,8 +20,10 @@ Data leaves the browser only when you explicitly ask:
 
 | Action | Where it goes |
 | --- | --- |
-| "Share" → permanent link | A Firestore document, readable by anyone with the link |
-| "Share" → URL fragment | Nowhere — the data is compressed into the URL itself |
+| "Share" → encrypted link *(default)* | A Firestore document holding **ciphertext only**; the key travels in the link's `#fragment` |
+| "Share" → password | A Firestore document holding ciphertext; the password never leaves the browser |
+| "Share" → open link | A Firestore document, readable by anyone with the link |
+| "Share" → URL fragment | Nowhere — the data is compressed into the URL itself (open shares only, when Firestore is unreachable) |
 | Gist sync | GitHub, under your personal access token |
 | GitHub repo browsing | Requests to `api.github.com` |
 | AI resolution *(backend only)* | Your text is sent to the Gemini API |
@@ -55,9 +57,49 @@ What the rules enforce, and why:
 - **An `expiresAt` is required on create**, must be in the future, and may be at
   most ~31 days beyond the timestamp. A client cannot mint a link that outlives
   the retention policy.
-- **`update` and `delete` denied.** A shared link is immutable — nobody can
-  rewrite the contents of a URL someone else has already circulated. Deletion is
-  performed by the cleanup job below, using the Admin SDK.
+- **`update` denied.** A shared link is immutable — nobody can rewrite the
+  contents of a URL someone else has already circulated.
+- **`delete` denied, except for burn-after-reading shares.** A document created
+  with `burnAfterReading: true` may be deleted by anyone holding its id — the id
+  is the read capability too. The reader's client deletes it right after a
+  successful decrypt. Everything else is deleted only by the cleanup job below,
+  using the Admin SDK.
+
+The key set on create is `data`, `timestamp`, `expiresAt`, and optionally
+`burnAfterReading` (which must be `true` if present).
+
+### Share encryption
+
+Encrypted shares (`src/lib/crypto/symmetric.ts`) use AES-256-GCM from the
+browser's WebCrypto. `data` then holds `tdsenc1:` followed by a JSON envelope
+(IV, ciphertext and, for passwords, the PBKDF2 salt and iteration count) —
+never plaintext, and not the note either.
+
+- **Encrypted link:** a random 256-bit key per share, put in the URL fragment
+  (`?id=<doc>#key=<base64url>`). Browsers don't send fragments in requests, so
+  neither GitHub Pages nor Firebase sees the key. Anyone who has the whole
+  link can read the share; anyone with only the database cannot.
+- **Password:** PBKDF2-SHA256, 100,000 iterations, random 128-bit salt. The
+  link alone opens nothing. The strength is the password's.
+
+GCM authenticates the ciphertext, so tampering or a wrong key fails loudly.
+If Firestore is unreachable, an encrypted share fails with an error rather than
+falling back to the plaintext URL-fragment link.
+
+What this does **not** protect against: a link pasted somewhere that logs full
+URLs including fragments (some chat apps and browser-sync services do), or a
+compromised copy of the app itself — the code that does the encrypting is
+served by the same origin.
+
+### Pro licences
+
+Pro is unlocked by an Ed25519-signed token (`src/lib/crypto/license.ts`)
+verified offline against a public key compiled into the app. The private key
+lives outside the repository (default `~/.textdiff/license-signing-key.jwk`,
+used by `scripts/issue-license.ts`). **Back it up; if it's lost, no new
+licences can be issued without shipping a new public key, and if it leaks,
+anyone can mint licences.** Enforcement is client-side and therefore
+honour-system: it gates features, not data.
 
 ### Expiry and cleanup
 
@@ -90,9 +132,10 @@ the cleanup query, and never expire. Delete them once by hand if that matters.
 Sharing is anonymous and unauthenticated by design, which caps how much the rules
 can do:
 
-- **Shared diffs are public to anyone with the link** for as long as they live.
-  There is no access control and no way to revoke a specific link early. Don't
-  share anything you wouldn't paste into a public gist.
+- **Shared diffs are readable by anyone with the full link** for as long as
+  they live (password shares additionally need the password). There is no way
+  to revoke a specific link early, short of burn-after-reading. Open
+  (unencrypted) shares are also readable by anyone with database access.
 - **Writes are unauthenticated.** Rate limiting is not possible in rules alone;
   the size cap is the only brake on someone scripting writes.
 

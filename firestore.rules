@@ -35,8 +35,10 @@ service cloud.firestore {
 
       allow create: if
         // Payload shape is fixed. Anything else is rejected.
-        request.resource.data.keys().hasOnly(['data', 'timestamp', 'expiresAt'])
+        request.resource.data.keys().hasOnly(['data', 'timestamp', 'expiresAt', 'burnAfterReading'])
         && request.resource.data.data is string
+        && (!('burnAfterReading' in request.resource.data)
+            || request.resource.data.burnAfterReading == true)
         // ~900KB ceiling, just under Firestore's 1MiB document limit. Large
         // enough for any realistic diff, small enough to bound abuse.
         && request.resource.data.data.size() < 900000
@@ -49,9 +51,15 @@ service cloud.firestore {
         && request.resource.data.expiresAt <=
              request.resource.data.timestamp + 2678400000;
 
-      // Shares are write-once. Deletion is performed by the cleanup job using
-      // the Admin SDK, which bypasses these rules; no client may delete.
-      allow update, delete: if false;
+      // Shares are write-once. Ordinary deletion is performed by the cleanup
+      // job using the Admin SDK, which bypasses these rules.
+      allow update: if false;
+
+      // Burn-after-reading: the reader's client deletes the share once it has
+      // decrypted it. Anyone holding the link may delete — the document ID is
+      // the capability, exactly as it is for reading. Shares without the flag
+      // stay undeletable by clients.
+      allow delete: if resource.data.get('burnAfterReading', false) == true;
     }
   }
 }

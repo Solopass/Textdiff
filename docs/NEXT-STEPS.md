@@ -236,7 +236,36 @@ Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
 
 ---
 
-## 6. Tiered Client-Side Encryption (The Only Paid Feature)
+## 6. Tiered Client-Side Encryption (The Only Paid Feature) [PARTLY DONE]
+
+**Done:**
+- Free tier: `src/lib/crypto/symmetric.ts`. Encrypted link (random key in
+  `?id=<doc>#key=…`, the default), password (PBKDF2 100k → AES-256-GCM), or
+  open. `ShareModal` replaces the old `prompt()`; `UnlockShareModal` asks for
+  passwords. The design's `#share=<docId>&key=` became `?id=<doc>#key=` so old
+  links and the existing read path keep working.
+- Licensing: `src/lib/crypto/license.ts`, `ProActivationModal`, header
+  "GO PRO" / "PRO ENCRYPTION" badge, palette entry. Mint keys with
+  `bun scripts/issue-license.ts --name "…" --email … [--days N]`. The private key
+  is at `~/.textdiff/license-signing-key.jwk` — **back it up somewhere safe**.
+  Stores the raw token rather than decoded fields, so it is re-verified each load.
+- Burn after reading (Pro), with a matching `firestore.rules` change.
+- Fixed in passing: self-hosted Monaco never actually loaded (see the CSP
+  section of `ARCHITECTURE.md`). Editors were stuck on "Loading..." in the
+  production build.
+
+**Before deploying:** deploy `firestore.rules` *before* anyone uses burn after
+reading — the old rules reject the extra key. The new rules accept everything
+the old ones did, so rules-first is safe here.
+
+**Still to do (marked "(soon)" in the Pro dialog — keep those honest):**
+- Recipient public-key encryption (ECDH P-256 / RSA-OAEP, GitHub `.keys`).
+  Note GitHub keys are SSH keys: `ssh-rsa` converts to RSA-OAEP, but
+  `ssh-ed25519` can't encrypt directly. Recipients also need a keypair UI.
+- WebAuthn PRF hardware binding.
+- `.tds.enc` archives. AES-GCM already authenticates, so the planned
+  HMAC-SHA256 would be redundant — use a GCM envelope like shares.
+- A real purchase flow; "Get a licence" is currently a mailto.
 
 ### Background & Monetization Philosophy
 TextDiff Studio is client-first, private-by-design, and open source (PolyForm Noncommercial).

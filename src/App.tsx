@@ -14,6 +14,18 @@ const MultiplayerMode = lazy(() =>
 const FolderDiff = lazy(() =>
   import('./components/FolderDiff').then((m) => ({ default: m.FolderDiff })),
 );
+// Share/Pro dialogs and the crypto behind them only matter once someone
+// shares, opens a share, or activates Pro (~7KB gzipped kept off first paint).
+const ShareModal = lazy(() =>
+  import('./components/ShareModal').then((m) => ({ default: m.ShareModal })),
+);
+const UnlockShareModal = lazy(() =>
+  import('./components/UnlockShareModal').then((m) => ({ default: m.UnlockShareModal })),
+);
+const ProActivationModal = lazy(() =>
+  import('./components/ProActivationModal').then((m) => ({ default: m.ProActivationModal })),
+);
+const loadCrypto = () => import('./lib/crypto/symmetric');
 
 /** Shared placeholder while a lazily-loaded panel is being fetched. */
 const PanelFallback = ({ label }: { label: string }) => (
@@ -75,6 +87,9 @@ import { SettingsPage } from "./components/SettingsPage";
 import { CloudSyncModal } from "./components/CloudSyncModal";
 import { GitConflictModal, type GitConflictParseResult } from "./components/GitConflictModal";
 import { HistoryModal } from "./components/HistoryModal";
+import type { ShareOptions } from "./components/ShareModal";
+import type { EncryptedEnvelope } from "./lib/crypto/symmetric";
+import type { LicensePayload } from "./lib/crypto/license";
 import { StatsBanner } from "./components/StatsBanner";
 import { StudioToolbar } from "./components/StudioToolbar";
 import { CustomizeModal } from "./components/CustomizeModal";
@@ -103,7 +118,6 @@ import { safeSetItem } from "./lib/storage";
 import {
   SERVER_FEATURES_ENABLED,
   COMING_SOON_TITLE,
-  SHARE_TTL_DAYS,
   SHARE_TTL_MS,
 } from "./lib/constants";
 import {
@@ -500,6 +514,71 @@ export default function App() {
     };
   }, []);
 
+  // Pro licence: re-verified from storage on every load (see lib/crypto/license).
+  const [proLicense, setProLicense] = useState<LicensePayload | null>(null);
+  const [showProModal, setShowProModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    import("./lib/crypto/license")
+      .then((m) => m.loadStoredLicense())
+      .then((p) => {
+        if (!cancelled) setProLicense(p);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const shareLoadStarted = useRef(false);
+
+  /** A passphrase-protected share waiting for its password. */
+  const [pendingUnlock, setPendingUnlock] = useState<{
+    envelope: EncryptedEnvelope;
+    docId: string;
+    burn: boolean;
+  } | null>(null);
+
+  const applySharedData = (data: any) => {
+    if (data.origText !== undefined) setOrigText(data.origText);
+    if (data.modText !== undefined) setModText(data.modText);
+    if (data.baseText !== undefined) setBaseText(data.baseText);
+    if (data.isThreeWay !== undefined) setIsThreeWay(data.isThreeWay);
+    if (data.language) setLanguage(data.language);
+    if (data.note) setLoadedAnnotation(data.note);
+  };
+
+  /**
+   * Burn-after-reading shares are deleted once their contents are safely in
+   * this tab — after decryption succeeds, so a mistyped password doesn't
+   * destroy the share. A failed delete is not fatal; the document still
+   * expires normally.
+   */
+  const burnShare = async (docId: string) => {
+    try {
+      const [{ deleteDoc, doc }, db] = await Promise.all([
+        import("firebase/firestore"),
+        getDb(),
+      ]);
+      await deleteDoc(doc(db, "diffs", docId));
+      setLoadedAnnotation((prev) =>
+        `${prev ? prev + "\n\n" : ""}🔥 This share has now self-destructed. Reloading the link will not bring it back.`,
+      );
+    } catch (e) {
+      console.error("Failed to burn share", e);
+    }
+  };
+
+  const unlockShare = async (passphrase: string) => {
+    if (!pendingUnlock) return;
+    const { decryptEnvelope } = await loadCrypto();
+    const plaintext = await decryptEnvelope(pendingUnlock.envelope, { passphrase });
+    applySharedData(JSON.parse(plaintext));
+    const { docId, burn } = pendingUnlock;
+    setPendingUnlock(null);
+    if (burn) await burnShare(docId);
+  };
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get("id");
@@ -536,13 +615,31 @@ export default function App() {
           return;
         }
 
-        const data = JSON.parse(raw.data);
-        if (data.origText !== undefined) setOrigText(data.origText);
-        if (data.modText !== undefined) setModText(data.modText);
-        if (data.baseText !== undefined) setBaseText(data.baseText);
-        if (data.isThreeWay !== undefined) setIsThreeWay(data.isThreeWay);
-        if (data.language) setLanguage(data.language);
-        if (data.note) setLoadedAnnotation(data.note);
+        const burn = raw.burnAfterReading === true;
+
+        const shareCrypto = await loadCrypto();
+        if (typeof raw.data === "string" && shareCrypto.isEncryptedPayload(raw.data)) {
+          const envelope = shareCrypto.parseEnvelope(raw.data);
+          if (envelope.mode === "passphrase") {
+            setPendingUnlock({ envelope, docId: id, burn });
+            return;
+          }
+          try {
+            const plaintext = await shareCrypto.decryptEnvelope(envelope, {
+              linkKey: shareCrypto.linkKeyFromHash(window.location.hash),
+            });
+            applySharedData(JSON.parse(plaintext));
+          } catch (e) {
+            setDiffError(
+              `${e instanceof Error ? e.message : "Could not decrypt this share."} ` +
+                "Make sure you copied the whole link, including everything after the #.",
+            );
+            return;
+          }
+        } else {
+          applySharedData(JSON.parse(raw.data));
+        }
+        if (burn) await burnShare(id);
       } catch (e) {
         console.error("Failed to load from Firestore", e);
         setDiffError("Could not load that share link. Please try again.");
@@ -550,7 +647,12 @@ export default function App() {
     };
 
     if (id) {
-      loadFromId(id);
+      // StrictMode runs this effect twice in development. A second fetch of a
+      // burn-after-reading share would race the first one's delete.
+      if (!shareLoadStarted.current) {
+        shareLoadStarted.current = true;
+        loadFromId(id);
+      }
     } else if (window.location.hash) {
       try {
         const hash = window.location.hash.substring(1);
@@ -712,6 +814,9 @@ export default function App() {
       // The palette handles its own Escape and stops propagation, so if it is
       // open we must not also close whatever is behind it.
       if (showPalette) return;
+      // These dialogs close themselves via useFocusTrap; don't also close
+      // whatever sits behind them.
+      if (showShareModal || showProModal || pendingUnlock) return;
       if (showDiffSearch) {
         setShowDiffSearch(false);
         setDiffSearchQuery("");
@@ -731,6 +836,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", onEscape);
   }, [
     showPalette,
+    showShareModal,
+    showProModal,
+    pendingUnlock,
     showDiffSearch,
     isFullscreen,
     showHelpModal,
@@ -907,69 +1015,87 @@ export default function App() {
   };
 
   const [isSharing, setIsSharing] = useState(false);
-  const shareUrl = async () => {
+  const openShare = () => setShowShareModal(true);
+
+  /**
+   * Creates a share and resolves to its URL. Throws user-facing messages; the
+   * ShareModal displays them.
+   *
+   * Encrypted shares store only ciphertext in Firestore. For link-key shares
+   * the key goes in the URL fragment, which browsers never transmit.
+   */
+  const createShare = async (opts: ShareOptions): Promise<string> => {
+    setIsSharing(true);
     try {
-      const note = prompt(
-        "Optional: Add an annotation or title for this share link (leave blank to skip):",
-      );
-      setIsSharing(true);
       const data = {
         origText,
         modText,
         baseText,
         language,
         isThreeWay,
-        note: note || "",
+        note: opts.note,
       };
-      const payload = JSON.stringify(data);
+      const plaintext = JSON.stringify(data);
 
-      // Mirrors the ceiling in firestore.rules. Checking here turns an opaque
-      // PERMISSION_DENIED into an actionable message.
-      const MAX_SHARE_BYTES = 900_000;
-      if (new Blob([payload]).size >= MAX_SHARE_BYTES) {
-        setIsSharing(false);
-        alert(
-          "This comparison is too large to share as a permanent link (limit ~900KB). " +
-            "Try sharing a smaller excerpt, or export the diff as a file instead.",
-        );
-        return;
+      let payload = plaintext;
+      let linkKey: string | undefined;
+      const { encryptWithLinkKey, encryptWithPassphrase, serializeEnvelope } = await loadCrypto();
+      if (opts.protection === "link-key") {
+        const sealed = await encryptWithLinkKey(plaintext);
+        payload = serializeEnvelope(sealed.envelope);
+        linkKey = sealed.linkKey;
+      } else if (opts.protection === "passphrase") {
+        payload = serializeEnvelope(await encryptWithPassphrase(plaintext, opts.passphrase));
       }
 
-      // Firestore is pulled in on demand; see getDb() in ./firebase.
-      const [{ addDoc, collection }, db] = await Promise.all([
-        import("firebase/firestore"),
-        getDb(),
-      ]);
-      const now = Date.now();
-      const docRef = await addDoc(collection(db, "diffs"), {
-        data: payload,
-        timestamp: now,
-        // Shared links expire. Without this, every diff anyone has ever shared
-        // stays publicly readable forever with no way to revoke it. The field
-        // is enforced by firestore.rules on create, checked on read below, and
-        // is what a scheduled cleanup job queries on. See SECURITY.md.
-        expiresAt: now + SHARE_TTL_MS,
-      });
-      const url = new URL(window.location.href);
-      url.searchParams.set("id", docRef.id);
-      url.hash = ""; // clear hash if any
-      await navigator.clipboard.writeText(url.toString());
-      alert(
-        `Shareable URL copied to clipboard.\n\n` +
-          `Anyone with this link can read the comparison. It expires in ${SHARE_TTL_DAYS} days.`,
-      );
-    } catch (err) {
-      console.error("Failed to create share link:", err);
-      // Fallback to local hash
-      const data = { origText, modText, baseText, language, isThreeWay };
-      const compressed = LZString.compressToEncodedURIComponent(
-        JSON.stringify(data),
-      );
-      const url = new URL(window.location.href);
-      url.hash = compressed;
-      navigator.clipboard
-        .writeText(url.toString())
-        .then(() => alert("Shareable URL (fallback) copied to clipboard!"));
+      // Mirrors the ceiling in firestore.rules. Checking here turns an opaque
+      // PERMISSION_DENIED into an actionable message. Measured after
+      // encryption, which inflates the payload by about a third (base64).
+      const MAX_SHARE_BYTES = 900_000;
+      if (new Blob([payload]).size >= MAX_SHARE_BYTES) {
+        throw new Error(
+          "This comparison is too large to share as a permanent link (limit ~900KB" +
+            (opts.protection === "none" ? "" : " after encryption") +
+            "). Try sharing a smaller excerpt, or export the diff as a file instead.",
+        );
+      }
+
+      try {
+        // Firestore is pulled in on demand; see getDb() in ./firebase.
+        const [{ addDoc, collection }, db] = await Promise.all([
+          import("firebase/firestore"),
+          getDb(),
+        ]);
+        const now = Date.now();
+        const docRef = await addDoc(collection(db, "diffs"), {
+          data: payload,
+          timestamp: now,
+          // Shared links expire. Without this, every diff anyone has ever shared
+          // stays publicly readable forever with no way to revoke it. The field
+          // is enforced by firestore.rules on create, checked on read below, and
+          // is what a scheduled cleanup job queries on. See SECURITY.md.
+          expiresAt: now + SHARE_TTL_MS,
+          ...(opts.burnAfterReading ? { burnAfterReading: true } : {}),
+        });
+        const url = new URL(window.location.href);
+        url.searchParams.set("id", docRef.id);
+        url.hash = linkKey ? `key=${linkKey}` : "";
+        return url.toString();
+      } catch (err) {
+        console.error("Failed to create share link:", err);
+        // The URL-fragment fallback carries plaintext, so it is only offered
+        // for open shares — never silently downgrade an encrypted one.
+        if (opts.protection !== "none") {
+          throw new Error("Could not reach the share server. Check your connection and try again.");
+        }
+        const compressed = LZString.compressToEncodedURIComponent(
+          JSON.stringify({ origText, modText, baseText, language, isThreeWay }),
+        );
+        const url = new URL(window.location.href);
+        url.search = "";
+        url.hash = compressed;
+        return url.toString();
+      }
     } finally {
       setIsSharing(false);
     }
@@ -1544,8 +1670,15 @@ Date: ${new Date().toLocaleString()}
       id: "share",
       title: "Create share link",
       group: "Share",
-      keywords: "url permalink copy",
-      run: shareUrl,
+      keywords: "url permalink copy encrypt password",
+      run: openShare,
+    },
+    {
+      id: "pro",
+      title: proLicense ? "Manage Pro licence" : "Activate Pro encryption",
+      group: "Share",
+      keywords: "licence license key upgrade burn",
+      run: () => setShowProModal(true),
     },
     {
       id: "history",
@@ -1635,7 +1768,7 @@ Date: ${new Date().toLocaleString()}
               <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
                 <Zap className="text-[#34D399] w-6 h-6" /> TextDiff Studio{" "}
                 <span className="text-[#94A3B8] font-mono text-sm align-top ml-2 bg-[#1E293B] px-1.5 py-0.5 rounded">
-                  v2.0-PRO
+                  v2.0
                 </span>
               </h1>
               <p className="text-[#64748B] font-serif italic text-sm mt-1">
@@ -1643,6 +1776,17 @@ Date: ${new Date().toLocaleString()}
               </p>
             </div>
             <div className="flex gap-4 items-center mt-4 md:mt-0">
+              <button
+                onClick={() => setShowProModal(true)}
+                title={proLicense ? `Pro licensed to ${proLicense.licensee}` : "Pro encryption"}
+                className={
+                  proLicense
+                    ? "px-2 py-0.5 text-xs font-mono font-bold tracking-widest bg-[#F59E0B] text-black border-2 border-black shadow-[2px_2px_0_#000]"
+                    : "px-2 py-0.5 text-xs font-mono tracking-widest text-[#F59E0B] border border-[#F59E0B]/50 hover:bg-[#F59E0B]/10"
+                }
+              >
+                {proLicense ? "PRO ENCRYPTION" : "GO PRO"}
+              </button>
               <button
                 onClick={() => setCurrentView("settings")}
                 className="p-2 text-[#94A3B8] hover:text-white hover:bg-[#1E293B] rounded transition-colors"
@@ -1728,7 +1872,7 @@ Date: ${new Date().toLocaleString()}
           language={language}
           setLanguage={setLanguage}
           onLoadSample={loadSample}
-          onShare={shareUrl}
+          onShare={openShare}
           isSharing={isSharing}
           onRunDiff={() => runDiff()}
         />
@@ -2411,6 +2555,49 @@ Date: ${new Date().toLocaleString()}
               setIsThreeWay(false);
               setShowFolderDiff(false);
               runDiff(textA, textB);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {showShareModal && (
+        <Suspense fallback={<PanelFallback label="share dialog" />}>
+          <ShareModal
+            isOpen
+            onClose={() => setShowShareModal(false)}
+            onCreate={createShare}
+            isPro={proLicense !== null}
+            onRequestPro={() => setShowProModal(true)}
+          />
+        </Suspense>
+      )}
+
+      {pendingUnlock && (
+        <Suspense fallback={<PanelFallback label="unlock dialog" />}>
+          <UnlockShareModal
+            isOpen
+            onClose={() => {
+              setPendingUnlock(null);
+              setDiffError("This share is password-protected. Reload the link to try again.");
+            }}
+            onUnlock={unlockShare}
+          />
+        </Suspense>
+      )}
+
+      {showProModal && (
+        <Suspense fallback={<PanelFallback label="Pro activation" />}>
+          <ProActivationModal
+            isOpen
+            onClose={() => setShowProModal(false)}
+            license={proLicense}
+            onActivate={async (token, payload) => {
+              (await import("./lib/crypto/license")).storeLicense(token);
+              setProLicense(payload);
+            }}
+            onDeactivate={async () => {
+              (await import("./lib/crypto/license")).clearLicense();
+              setProLicense(null);
             }}
           />
         </Suspense>
