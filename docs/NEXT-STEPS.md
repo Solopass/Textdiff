@@ -236,6 +236,134 @@ Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
 
 ---
 
+## 6. Tiered Client-Side Encryption (The Only Paid Feature)
+
+### Background & Monetization Philosophy
+TextDiff Studio is client-first, private-by-design, and open source (PolyForm Noncommercial).
+**This encryption upgrade will be the *only* paid feature this application will ever have.**
+All core diff engines, Monaco integrations, local history, export tools (PDF, PNG, patch, CSV),
+conflict resolvers, folder comparisons, and basic sharing remain 100% free forever.
+
+Because TextDiff Studio runs entirely as a static client on GitHub Pages, the paid upgrade
+**does not require an account server or telemetry**. It uses cryptographically signed offline
+license keys (Ed25519) verified locally via WebCrypto, preserving full offline capability.
+
+### 6.1 — Tier Comparison
+
+| Capability | Free Tier ("Mid Encryption") | Paid Pro Tier ("Military / Cool Encryption") |
+| :--- | :--- | :--- |
+| **Cryptography Core** | Passphrase-derived AES-256-GCM via PBKDF2 (100k rounds) | Asymmetric ECDH (P-256 / P-384) + RSA-OAEP + AES-256-GCM |
+| **Key Exchange** | Manual shared password out-of-band | Public-key sharing (encrypt for recipient's public key or GitHub handle) |
+| **Zero-Knowledge Link** | Key in URL hash fragment (`#key=...`) | Ephemeral forward secrecy + ECDH envelope |
+| **Burn-After-Reading** | Standard 30-day Firestore TTL | One-time self-destructing shares (deleted on first decryption) |
+| **Hardware Key Binding** | ✕ None | WebAuthn / FIDO2 passkey hardware envelope (YubiKey / Touch ID) |
+| **Offline Archiving** | Plain text / JSON exports | `.tds.enc` encrypted bundle with HMAC-SHA256 integrity verification |
+| **Activation Model** | Unlocked out of the box (zero friction) | Offline cryptographically signed license key (Ed25519) |
+
+### 6.2 — Architecture & Implementation
+
+1. **Free Tier Implementation ("Mid Encryption")**:
+   - Location: `src/lib/crypto/symmetric.ts`
+   - Uses native `window.crypto.subtle` (zero npm bundle bloat).
+   - Generates random 128-bit salt and 96-bit IV per encryption.
+   - Derives AES-GCM 256-bit key from user passphrase using PBKDF2 (SHA-256, 100,000 iterations).
+   - Zero-Knowledge Cloud Sharing: The derived key or passphrase is stored in the browser URL hash fragment (`#share=<docId>&key=<b64>`). Browsers never transmit hash fragments to HTTP servers or Firebase backends. Decryption occurs purely in the client.
+
+2. **Paid Pro Upgrade ("Military / Cool Encryption")**:
+   - Location: `src/lib/crypto/asymmetric.ts`, `src/lib/crypto/license.ts`
+   - **Offline License Verification**:
+     - Embedded public Ed25519 verification key (`TEXTDIFF_RELEASE_KEY`).
+     - User pastes license key string: `TDS-PRO-<base64-payload>.<base64-signature>`.
+     - Client validates signature using WebCrypto. If valid, stores `{ licensee, email, issuedAt, expiresAt }` in `localStorage` under `tds_pro_license`.
+     - Unlocks the "PRO ENCRYPTION" badge in header and enables advanced cipher suites.
+   - **Public-Key Recipient Encryption**:
+     - Enables User A to encrypt a diff specifically for User B without sharing a password.
+     - Supports importing recipient's public key (PEM / JWK / or fetching `https://github.com/<username>.keys`).
+     - Generates ephemeral symmetric AES-256-GCM key, encrypts payload, and wraps symmetric key with recipient's RSA-OAEP or ECDH public key.
+   - **Burn-After-Reading (Self-Destruct)**:
+     - Share document marked with `burnAfterReading: true`.
+     - Firestore security rules allow the first reader to trigger deletion upon retrieval, or client requests atomic delete via Firestore transaction.
+   - **Hardware Token / Passkey Envelope (WebAuthn)**:
+     - Leverages WebAuthn PRF (Pseudo-Random Function) extension or asymmetric credential assertion to bind local diff archives to hardware keys (YubiKey, Apple Touch ID, Windows Hello).
+
+### 6.3 — How you know it worked
+- Free tier encrypts a sample diff with password, produces ciphertext without leaking plaintext in network payload, and decrypts accurately when opened with `#key=...`.
+- Attempting to unlock Pro features without a license prompts the retro activation modal.
+- Entering a valid Ed25519-signed test license key successfully unlocks Pro status, sets `tds_pro_license`, and passes signature verification.
+- Tampered license key payloads or invalid signatures are rejected with explicit feedback.
+- Public-key encryption roundtrip: generate keypair, encrypt diff with recipient public key, verify decryption succeeds with recipient private key and fails with wrong key.
+
+---
+
+## 7. Public "Diff Feed" (Retro Twitter Micro-Stream)
+
+### Background & Vibe
+A nostalgic, distraction-free community micro-stream inspired by original 2006–2008 Twitter ("Twttr").
+Developers and writers can share what they are working on, patch snippets, refactors, and micro-diffs
+directly from the main studio toolbar into a public, chronological firehose. No algorithms, no ads,
+no engagement gaming — just pure text changes from across the web.
+
+### 7.1 — Features & UX Workflow
+
+1. **Toolbar Composer ("POST TO FEED")**:
+   - Dedicated button on `StudioToolbar` (or `Ctrl+K` -> "Post diff to public feed").
+   - Modal micro-composer:
+     - **Caption input**: 280 character maximum with live counter.
+     - **Author Handle**: Optional handle (e.g. `@jake`, `@anon`), persisted in `tds_author_handle`.
+     - **Diff Summary pill**: Auto-attached (`+12 -4`, language, similarity %, file names).
+     - **Hunk Preview**: Select whether to include the top 3–5 changed lines as a monospace snippet preview.
+     - **Action**: "POST DIFF (280 chars max)" button with retro press animation.
+
+2. **Retro Feed Viewer ("THE FEED")**:
+   - Access via toolbar tab or header link: switches view or slides in a clean retro drawer.
+   - Minimalist 2006-era Twitter typography & styling: clean borders, high-contrast monospace snippets, retro timestamps ("3m ago", "Oct 7, 2026").
+   - Feed Item Anatomy:
+     - Header: `@handle` • timestamp • language tag (`#typescript`, `#rust`).
+     - Caption: 280-char note explaining the change with highlighted `#hashtags`.
+     - Diff Card: Mini syntax-highlighted diff hunk preview showing additions/deletions.
+     - Direct Actions:
+       - **"OPEN IN STUDIO"**: 1-click loads both buffers directly into TextDiff Studio for interactive comparison, editing, and merging.
+       - **"COPY PATCH"**: 1-click copies the unified git diff to clipboard.
+       - **"SHARE LINK"**: Quick copy permalink to feed post.
+
+3. **Data Schema & Backend (Firestore `/diff_feed`)**:
+   ```typescript
+   interface FeedItem {
+     id: string;
+     author: string;          // max 30 chars, defaults to "@anonymous"
+     caption: string;         // max 280 chars
+     tags: string[];          // extracted #hashtags
+     timestamp: number;       // server timestamp (milliseconds)
+     origSnippet: string;     // truncated first hunk (max 1000 chars)
+     modSnippet: string;      // truncated first hunk (max 1000 chars)
+     fullShareId?: string;    // optional pointer to full diff in /shares collection
+     stats: {
+       additions: number;
+       deletions: number;
+       similarity: number;
+       language: string;
+     };
+   }
+   ```
+
+4. **Security & Rate Limiting**:
+   - Firestore security rules strictly validate:
+     - `caption.size() <= 280`
+     - `author.size() <= 30`
+     - Document size < 4 KB
+     - `timestamp` is valid request time
+     - Only allows `create` and `read`; `update` and `delete` disallowed for public callers.
+   - Client-side cooldown (e.g. 30-second delay between posts per browser session) to prevent accidental flooding.
+
+### 7.2 — How you know it worked
+- Clicking "POST TO FEED" from the toolbar opens the micro-composer pre-populated with current diff stats.
+- Exceeding 280 characters disables the submit button and turns the character counter red.
+- Submitting successfully creates a document in Firestore `/diff_feed` and immediately appears at the top of the feed stream.
+- Clicking "OPEN IN STUDIO" on any feed item populates original and modified panes in the studio, runs the diff worker, and updates stats.
+- Clicking "COPY PATCH" copies a valid unified diff that can be tested with `git apply --check`.
+
+---
+
 ## Optional: remove the manual browser step entirely
 
 Every remaining "you have to check this by hand" item exists because the
