@@ -4,45 +4,45 @@
  * Replaced with a plain textarea under test — see src/test/monacoMock.tsx for
  * why Monaco itself can't run in jsdom.
  */
-import { useEffect } from "react";
-import Editor, { useMonaco, loader } from "@monaco-editor/react";
+import { useEffect, useState } from "react";
+import Editor, { useMonaco } from "@monaco-editor/react";
+import { ensureMonaco, isMonacoReady } from "../lib/monacoSetup";
 
-// Self-host Monaco by configuring the loader dynamically in browser context.
-// Loading monaco-editor and its web workers via dynamic import ensures that Monaco
-// stays in a lazy chunk and is not bundled into the first-paint bundle.
-if (typeof window !== "undefined") {
-  Promise.all([
-    import("monaco-editor"),
-    import("monaco-editor/editor/editor.worker?worker"),
-    import("monaco-editor/language/json/json.worker?worker"),
-    import("monaco-editor/language/css/css.worker?worker"),
-    import("monaco-editor/language/html/html.worker?worker"),
-    import("monaco-editor/language/typescript/ts.worker?worker"),
-  ]).then(([monaco, editorWorker, jsonWorker, cssWorker, htmlWorker, tsWorker]) => {
-    (window as any).MonacoEnvironment = {
-      getWorker(_: any, label: string) {
-        if (label === "json") {
-          return new jsonWorker.default();
-        }
-        if (label === "css" || label === "scss" || label === "less") {
-          return new cssWorker.default();
-        }
-        if (label === "html" || label === "handlebars" || label === "razor") {
-          return new htmlWorker.default();
-        }
-        if (label === "typescript" || label === "javascript") {
-          return new tsWorker.default();
-        }
-        return new editorWorker.default();
+/**
+ * Holds the editor back until the self-hosted Monaco is configured. Mounting
+ * <Editor> or calling useMonaco() any earlier makes the loader fetch Monaco
+ * from a CDN the CSP blocks — see lib/monacoSetup.ts.
+ */
+export const TextAreaWithLineNumbers = (props: any) => {
+  const [ready, setReady] = useState(isMonacoReady);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (ready) return;
+    let cancelled = false;
+    ensureMonaco().then(
+      () => !cancelled && setReady(true),
+      (err) => {
+        console.error("Failed to initialize self-hosted Monaco editor:", err);
+        if (!cancelled) setFailed(true);
       },
+    );
+    return () => {
+      cancelled = true;
     };
-    loader.config({ monaco });
-  }).catch((err) => {
-    console.error("Failed to initialize self-hosted Monaco editor:", err);
-  });
-}
+  }, [ready]);
 
-export const TextAreaWithLineNumbers = ({
+  if (!ready) {
+    return (
+      <div className="flex w-full h-full min-h-[320px] items-center justify-center rounded-md border border-[#334155] font-mono text-xs text-[#64748B]">
+        {failed ? "Editor failed to load — reload the page to try again." : "Loading editor…"}
+      </div>
+    );
+  }
+  return <MonacoPane {...props} />;
+};
+
+const MonacoPane = ({
   value,
   onChange,
   placeholder,

@@ -1,8 +1,15 @@
 import '@testing-library/jest-dom';
 import * as matchers from "vitest-axe/matchers";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 
 expect.extend(matchers);
+
+// The real bootstrap imports Monaco and its workers, which jsdom can't run.
+// Report it as ready so the (mocked) editor renders immediately.
+vi.mock("./lib/monacoSetup", () => ({
+  ensureMonaco: () => Promise.resolve(),
+  isMonacoReady: () => true,
+}));
 import { computeLCS, compute3Way } from './diffWorker';
 
 /**
