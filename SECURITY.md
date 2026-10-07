@@ -24,6 +24,7 @@ Data leaves the browser only when you explicitly ask:
 | "Share" → password | A Firestore document holding ciphertext; the password never leaves the browser |
 | "Share" → open link | A Firestore document, readable by anyone with the link |
 | "Share" → URL fragment | Nowhere — the data is compressed into the URL itself (open shares only, when Firestore is unreachable) |
+| "Post to feed" | A **public, permanent** `diff_feed` document: your caption, handle, stats, and (if ticked) the first hunk |
 | Gist sync | GitHub, under your personal access token |
 | GitHub repo browsing | Requests to `api.github.com` |
 | AI resolution *(backend only)* | Your text is sent to the Gemini API |
@@ -67,6 +68,18 @@ What the rules enforce, and why:
 
 The key set on create is `data`, `timestamp`, `expiresAt`, and optionally
 `burnAfterReading` (which must be `true` if present).
+
+### The diff feed
+
+`/diff_feed` is public by design: `get` and `list` are allowed (pages of ≤50),
+create is shape- and size-checked (caption ≤280, author ≤30 matching
+`@[A-Za-z0-9_.-]+`, hunk ≤2000, ≤5 tags, integer stats), `timestamp` must
+equal `request.time`, and update/delete are denied to clients. Posts are
+plaintext and permanent — the composer says so before posting.
+
+It is an unauthenticated write endpoint, so spam is the main risk. The
+client's 30-second cooldown is a courtesy, not a control. If abuse appears,
+add Firebase App Check and moderate with the Admin SDK.
 
 ### Share encryption
 

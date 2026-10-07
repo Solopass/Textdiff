@@ -15,6 +15,8 @@ import {
   Trash2,
   ArrowLeftRight,
   Share2,
+  Megaphone,
+  Rss,
 } from "lucide-react";
 import { SERVER_FEATURES_ENABLED, COMING_SOON_TITLE } from "../lib/constants";
 
@@ -62,6 +64,9 @@ interface Props {
   onLoadSample: () => void;
   onShare: () => void;
   isSharing: boolean;
+  onPostToFeed: () => void;
+  canPostToFeed: boolean;
+  onOpenFeed: () => void;
   onRunDiff: () => void;
 }
 
@@ -102,6 +107,9 @@ export const StudioToolbar: React.FC<Props> = ({
   onLoadSample,
   onShare,
   isSharing,
+  onPostToFeed,
+  canPostToFeed,
+  onOpenFeed,
   onRunDiff,
 }) => {
   return (
@@ -357,6 +365,23 @@ export const StudioToolbar: React.FC<Props> = ({
             <Share2 className="w-3.5 h-3.5" />
           )}
           {isSharing ? "SHARING..." : "SHARE"}
+        </button>
+        <button
+          onClick={onPostToFeed}
+          disabled={!canPostToFeed}
+          title={canPostToFeed ? "Post this diff to the public feed" : "Run a diff first"}
+          className="px-3 py-1.5 border border-[#0084B4] bg-[#33CCFF]/15 text-[#7FD3F7] hover:bg-[#33CCFF]/30 transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Megaphone className="w-3.5 h-3.5" />
+          POST TO FEED
+        </button>
+        <button
+          onClick={onOpenFeed}
+          title="The public diff feed"
+          className="px-3 py-1.5 border border-[#334155] bg-[#1E293B] text-[#7FD3F7] hover:bg-[#334155] transition-colors flex items-center gap-2"
+        >
+          <Rss className="w-3.5 h-3.5" />
+          FEED
         </button>
         <button
           onClick={onRunDiff}

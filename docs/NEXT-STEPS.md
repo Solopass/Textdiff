@@ -324,7 +324,31 @@ license keys (Ed25519) verified locally via WebCrypto, preserving full offline c
 
 ---
 
-## 7. Public "Diff Feed" (Retro Twitter Micro-Stream)
+## 7. Public "Diff Feed" (Retro Twitter Micro-Stream) [DONE — needs rules deploy]
+
+**Done:** `POST TO FEED` / `FEED` toolbar buttons and palette entries,
+`FeedComposerModal` (280-char counter, persisted handle, stats pills, hunk
+preview, optional full-comparison attachment, 30s per-session cooldown, public
+warning), `FeedDrawer` (chronological, OPEN IN STUDIO, COPY PATCH, SHARE LINK →
+`?post=<id>`), `/diff_feed` rules. Logic in `src/lib/feed.ts`, Firestore calls
+in `src/lib/feedApi.ts`; all lazy.
+
+**Deviations from the design below:**
+- A post stores the first hunk as unified-diff text (`hunk`, ≤2000 chars)
+  instead of `origSnippet`/`modSnippet`. COPY PATCH then needs no re-diffing and
+  is a real patch — `src/lib/feed.test.ts` runs `git apply --check` *and*
+  `git apply` on it. Both sides for OPEN IN STUDIO come from `splitHunk`.
+- `timestamp` is a Firestore server timestamp, and the rules require
+  `timestamp == request.time`, so posts can't be backdated or future-dated to
+  stay on top. Optional `fileName` added.
+
+**Before it works live:** `firebase deploy --only firestore:rules`. Until then
+reads fail with "The feed isn't available right now."
+
+**Open risk — spam.** It's an unauthenticated public write endpoint. The rules
+bound size and shape; the 30s cooldown is client-side only and trivially
+bypassed. If it gets abused, the next steps are Firebase App Check and an
+Admin-SDK moderation script (client deletes are denied by design).
 
 ### Background & Vibe
 A nostalgic, distraction-free community micro-stream inspired by original 2006–2008 Twitter ("Twttr").

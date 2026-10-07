@@ -61,5 +61,46 @@ service cloud.firestore {
       // stay undeletable by clients.
       allow delete: if resource.data.get('burnAfterReading', false) == true;
     }
+
+    // The public Diff Feed. Unlike `diffs`, this is meant to be browsed, so
+    // `list` is allowed — but only in pages of at most 50. Limits mirror
+    // src/lib/feed.ts; change both together.
+    match /diff_feed/{postId} {
+      allow get: if true;
+      allow list: if request.query.limit <= 50;
+
+      allow create: if
+        request.resource.data.keys().hasOnly(
+          ['author', 'caption', 'tags', 'timestamp', 'stats', 'hunk', 'fileName', 'fullShareId'])
+        && request.resource.data.keys().hasAll(['author', 'caption', 'tags', 'timestamp', 'stats'])
+        && request.resource.data.author is string
+        && request.resource.data.author.size() >= 2
+        && request.resource.data.author.size() <= 30
+        && request.resource.data.author.matches('@[A-Za-z0-9_.-]+')
+        && request.resource.data.caption is string
+        && request.resource.data.caption.size() >= 1
+        && request.resource.data.caption.size() <= 280
+        && request.resource.data.tags is list
+        && request.resource.data.tags.size() <= 5
+        // The server's clock only: no backdating, no future-dating to stay on top.
+        && request.resource.data.timestamp == request.time
+        && request.resource.data.stats is map
+        && request.resource.data.stats.keys().hasOnly(['additions', 'deletions', 'similarity', 'language'])
+        && request.resource.data.stats.additions is int
+        && request.resource.data.stats.deletions is int
+        && request.resource.data.stats.similarity is int
+        && request.resource.data.stats.language is string
+        && request.resource.data.stats.language.size() <= 20
+        && (!('hunk' in request.resource.data)
+            || (request.resource.data.hunk is string && request.resource.data.hunk.size() <= 2000))
+        && (!('fileName' in request.resource.data)
+            || (request.resource.data.fileName is string && request.resource.data.fileName.size() <= 100))
+        && (!('fullShareId' in request.resource.data)
+            || (request.resource.data.fullShareId is string && request.resource.data.fullShareId.size() <= 40));
+
+      // Posts are permanent and immutable from the client. Moderation, if it
+      // is ever needed, goes through the Admin SDK.
+      allow update, delete: if false;
+    }
   }
 }

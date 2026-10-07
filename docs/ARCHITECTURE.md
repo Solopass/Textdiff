@@ -15,6 +15,8 @@ index.html          CSP, SEO/social meta, service worker registration
               ├── hooks/
               │     └── useFocusTrap.ts  keyboard focus trapping for accessible modals
               ├── lib/
+              │     ├── feed.ts        public feed: hunk/patch, tags, handles, cooldown
+              │     ├── feedApi.ts     feed Firestore reads/writes (lazy)
               │     ├── diffStats.ts   DiffRow/WordPart types + computeDiffStats
               │     ├── diffExport.ts  Report & patch generators (.patch, .csv, .md, .json, .html)
               │     ├── highlight.ts   Prism highlighting + HTML export
@@ -41,6 +43,8 @@ index.html          CSP, SEO/social meta, service worker registration
                     ├── ShareModal.tsx       share options: encrypted / password / open, burn
                     ├── UnlockShareModal.tsx password prompt for protected shares
                     ├── ProActivationModal.tsx tier table + licence activation
+                    ├── FeedComposerModal.tsx  "POST TO FEED" micro-composer
+                    ├── FeedDrawer.tsx         THE FEED, chronological public stream
                     ├── CustomizeModal.tsx   theme, typography & custom CSS modal
                     ├── FolderDiff.tsx       folder/ZIP comparison (+ compare, stripRoot)
                     ├── GitHubIntegration.tsx
@@ -310,6 +314,25 @@ so an oversized share produces a clear message instead of an opaque
 `PERMISSION_DENIED`. If you change the payload shape, `firestore.rules` pins the
 allowed keys and must change with it — see `SECURITY.md`.
 
+## The public Diff Feed
+
+A deliberately 2007-flavoured stream in the `diff_feed` collection, newest
+first, 30 per page, no ranking. A post is `{ author, caption, tags, timestamp,
+stats, hunk?, fileName?, fullShareId? }`.
+
+- **`hunk`** is the first hunk of the diff as unified-diff text, built by
+  `firstHunk()` from the rendered rows (3 lines of context, header recomputed
+  after truncation). Storing the +/- text rather than two snippets is what lets
+  COPY PATCH emit a patch `git apply` accepts; `feed.test.ts` checks that with
+  real git. `splitHunk()` recovers both sides for OPEN IN STUDIO.
+- **`timestamp`** is `serverTimestamp()`; the rules require it to equal
+  `request.time`.
+- **`fullShareId`** points at an ordinary *open* share in `diffs`; OPEN IN
+  STUDIO navigates to `?id=` so the normal load path (expiry included) runs.
+- `?post=<id>` opens the drawer with that post pinned on top.
+
+Limits live in `lib/feed.ts` and are mirrored in `firestore.rules`.
+
 ## Interactive Diff Features
 
 ### Adjustable Fold Context
@@ -331,7 +354,10 @@ Users can double-click any cell in Split or Unified diff views to edit text dire
 
 ## Testing
 
-`npm test` (Vitest + jsdom). 129 tests across 18 test suites.
+`npm test` (Vitest + jsdom). 147 tests across 20 test suites. Feed coverage:
+`src/lib/feed.test.ts` (hunks, patches via real `git apply`, tags, handles,
+timestamps) and `src/feed.test.tsx` (composer limits, post shape, cooldown,
+open in studio, copy patch, permalinks).
 
 **Unit — pure logic:**
 

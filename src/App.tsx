@@ -26,6 +26,13 @@ const ProActivationModal = lazy(() =>
   import('./components/ProActivationModal').then((m) => ({ default: m.ProActivationModal })),
 );
 const loadCrypto = () => import('./lib/crypto/symmetric');
+// The public feed: composer, drawer, and their Firestore calls are all lazy.
+const FeedComposerModal = lazy(() =>
+  import('./components/FeedComposerModal').then((m) => ({ default: m.FeedComposerModal })),
+);
+const FeedDrawer = lazy(() =>
+  import('./components/FeedDrawer').then((m) => ({ default: m.FeedDrawer })),
+);
 
 /** Shared placeholder while a lazily-loaded panel is being fetched. */
 const PanelFallback = ({ label }: { label: string }) => (
@@ -90,6 +97,7 @@ import { HistoryModal } from "./components/HistoryModal";
 import type { ShareOptions } from "./components/ShareModal";
 import type { EncryptedEnvelope } from "./lib/crypto/symmetric";
 import type { LicensePayload } from "./lib/crypto/license";
+import type { FeedItem } from "./lib/feed";
 import { StatsBanner } from "./components/StatsBanner";
 import { StudioToolbar } from "./components/StudioToolbar";
 import { CustomizeModal } from "./components/CustomizeModal";
@@ -518,6 +526,18 @@ export default function App() {
   const [proLicense, setProLicense] = useState<LicensePayload | null>(null);
   const [showProModal, setShowProModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Public diff feed. `?post=<id>` permalinks open the drawer on that post.
+  const [showFeed, setShowFeed] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
+  const [localPosts, setLocalPosts] = useState<FeedItem[]>([]);
+  const [focusPostId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("post"),
+  );
+  useEffect(() => {
+    if (focusPostId) setShowFeed(true);
+  }, [focusPostId]);
+
   useEffect(() => {
     let cancelled = false;
     import("./lib/crypto/license")
@@ -582,7 +602,7 @@ export default function App() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get("id");
-    if (id || window.location.hash) {
+    if (id || window.location.hash || urlParams.get("post")) {
       setCurrentView("app");
     }
 
@@ -816,7 +836,7 @@ export default function App() {
       if (showPalette) return;
       // These dialogs close themselves via useFocusTrap; don't also close
       // whatever sits behind them.
-      if (showShareModal || showProModal || pendingUnlock) return;
+      if (showShareModal || showProModal || pendingUnlock || showFeed || showComposer) return;
       if (showDiffSearch) {
         setShowDiffSearch(false);
         setDiffSearchQuery("");
@@ -839,6 +859,8 @@ export default function App() {
     showShareModal,
     showProModal,
     pendingUnlock,
+    showFeed,
+    showComposer,
     showDiffSearch,
     isFullscreen,
     showHelpModal,
@@ -1099,6 +1121,69 @@ export default function App() {
     } finally {
       setIsSharing(false);
     }
+  };
+
+  const postToFeed = async (input: {
+    caption: string;
+    handle: string;
+    includeHunk: boolean;
+    attachFull: boolean;
+    hunk: string | null;
+  }) => {
+    const [feed, api] = await Promise.all([import("./lib/feed"), import("./lib/feedApi")]);
+    let fullShareId: string | undefined;
+    if (input.attachFull) {
+      const url = new URL(
+        await createShare({ note: input.caption, protection: "none", passphrase: "", burnAfterReading: false }),
+      );
+      // The offline fallback produces a fragment link with no id; post without it.
+      fullShareId = url.searchParams.get("id") ?? undefined;
+    }
+    const s = stats ?? { addCount: 0, delCount: 0, similarity: 100 };
+    const fileName = (fileNameB || fileNameA).slice(0, feed.FEED_FILENAME_MAX) || undefined;
+    let item: FeedItem;
+    try {
+      item = await api.createPost({
+        author: input.handle,
+        caption: input.caption,
+        tags: feed.extractTags(input.caption),
+        stats: { additions: s.addCount, deletions: s.delCount, similarity: s.similarity, language },
+        hunk: input.includeHunk && input.hunk ? input.hunk : undefined,
+        fileName,
+        fullShareId,
+      });
+    } catch (err) {
+      console.error("Failed to post to feed", err);
+      throw new Error("Couldn't post to the feed. Check your connection and try again.");
+    }
+    feed.markPosted();
+    safeSetItem(feed.FEED_HANDLE_KEY, input.handle);
+    setLocalPosts((prev) => [item, ...prev]);
+    setShowComposer(false);
+    setShowFeed(true);
+  };
+
+  const openFeedItem = async (item: FeedItem) => {
+    if (item.fullShareId) {
+      // Full comparisons are ordinary share links; let the normal load path
+      // (expiry checks and all) handle them.
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      url.searchParams.set("id", item.fullShareId);
+      window.location.assign(url.toString());
+      return;
+    }
+    if (!item.hunk) return;
+    const { splitHunk } = await import("./lib/feed");
+    const { orig, mod } = splitHunk(item.hunk);
+    setOrigText(orig);
+    setModText(mod);
+    setIsThreeWay(false);
+    if (item.stats.language) setLanguage(item.stats.language);
+    setLoadedAnnotation(`${item.author}: ${item.caption}`);
+    setShowFeed(false);
+    runDiff(orig, mod);
   };
 
   /**
@@ -1674,6 +1759,21 @@ Date: ${new Date().toLocaleString()}
       run: openShare,
     },
     {
+      id: "feed-post",
+      title: "Post diff to public feed",
+      group: "Share",
+      keywords: "tweet publish status update twttr",
+      disabled: !diffResult,
+      run: () => setShowComposer(true),
+    },
+    {
+      id: "feed-open",
+      title: "Open the feed",
+      group: "Share",
+      keywords: "public stream timeline twttr community",
+      run: () => setShowFeed(true),
+    },
+    {
       id: "pro",
       title: proLicense ? "Manage Pro licence" : "Activate Pro encryption",
       group: "Share",
@@ -1874,6 +1974,9 @@ Date: ${new Date().toLocaleString()}
           onLoadSample={loadSample}
           onShare={openShare}
           isSharing={isSharing}
+          onPostToFeed={() => setShowComposer(true)}
+          canPostToFeed={!!diffResult}
+          onOpenFeed={() => setShowFeed(true)}
           onRunDiff={() => runDiff()}
         />
 
@@ -2581,6 +2684,35 @@ Date: ${new Date().toLocaleString()}
               setDiffError("This share is password-protected. Reload the link to try again.");
             }}
             onUnlock={unlockShare}
+          />
+        </Suspense>
+      )}
+
+      {showComposer && (
+        <Suspense fallback={<PanelFallback label="composer" />}>
+          <FeedComposerModal
+            isOpen
+            onClose={() => setShowComposer(false)}
+            stats={{
+              additions: stats?.addCount ?? 0,
+              deletions: stats?.delCount ?? 0,
+              similarity: stats?.similarity ?? 100,
+              language,
+            }}
+            fileName={fileNameB || fileNameA || undefined}
+            rows={diffResult}
+            onPost={postToFeed}
+          />
+        </Suspense>
+      )}
+
+      {showFeed && (
+        <Suspense fallback={<PanelFallback label="the feed" />}>
+          <FeedDrawer
+            onClose={() => setShowFeed(false)}
+            onOpenInStudio={openFeedItem}
+            localPosts={localPosts}
+            focusPostId={focusPostId}
           />
         </Suspense>
       )}
