@@ -30,6 +30,7 @@ export const FeedDrawer: React.FC<Props> = ({ onClose, onOpenInStudio, localPost
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string>("");
   const [now, setNow] = useState(Date.now());
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +82,14 @@ export const FeedDrawer: React.FC<Props> = ({ onClose, onOpenInStudio, localPost
     seen.has(i.id) ? false : (seen.add(i.id), true),
   );
 
+  const filtered = selectedTag
+    ? merged.filter(
+        (i) =>
+          i.tags?.some((t) => t.toLowerCase() === selectedTag.toLowerCase()) ||
+          i.stats.language?.toLowerCase() === selectedTag.toLowerCase(),
+      )
+    : merged;
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" role="dialog" aria-modal="true" aria-labelledby="feed-title">
       <div
@@ -102,6 +111,24 @@ export const FeedDrawer: React.FC<Props> = ({ onClose, onOpenInStudio, localPost
           </div>
         </header>
 
+        {selectedTag && (
+          <div className="flex items-center justify-between px-4 py-2 bg-[#E8F5FD] border-b border-[#AAB8C2] text-xs">
+            <div className="flex items-center gap-1.5 text-[#14171A]">
+              <span className="text-[#657786]">Filter:</span>
+              <span className="font-bold text-[#0084B4]">#{selectedTag}</span>
+              <span className="text-[#657786]">({filtered.length} {filtered.length === 1 ? "post" : "posts"})</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedTag(null)}
+              aria-label="Clear tag filter"
+              className="flex items-center gap-1 text-[#0084B4] hover:text-[#00698C] font-semibold text-xs cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-3">
           <div className="bg-white rounded-md border border-[#AAB8C2]">
             {error && (
@@ -112,10 +139,22 @@ export const FeedDrawer: React.FC<Props> = ({ onClose, onOpenInStudio, localPost
             {!loading && merged.length === 0 && !error && (
               <p className="p-6 text-center text-sm text-[#657786]">Nothing here yet. Be the first to post a diff.</p>
             )}
+            {!loading && merged.length > 0 && filtered.length === 0 && (
+              <div className="p-6 text-center text-sm text-[#657786]">
+                <p>No posts matching #{selectedTag}.</p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTag(null)}
+                  className="mt-2 text-[#0084B4] hover:underline font-medium text-xs cursor-pointer"
+                >
+                  Clear filter
+                </button>
+              </div>
+            )}
             {loading && merged.length === 0 && <p className="p-6 text-center text-sm text-[#657786]">Loading…</p>}
 
             <ol>
-              {merged.map((item) => (
+              {filtered.map((item) => (
                 <li
                   key={item.id}
                   className={`p-3 border-b border-[#E1E8ED] last:border-b-0 ${item.id === focusPostId ? "bg-[#FFFCE5]" : ""}`}
@@ -123,15 +162,30 @@ export const FeedDrawer: React.FC<Props> = ({ onClose, onOpenInStudio, localPost
                   <div className="flex items-baseline gap-2 text-sm">
                     <span className="font-bold text-[#0084B4]">{item.author}</span>
                     <span className="text-[#AAB8C2] text-xs">{relativeTime(item.timestamp, now)}</span>
-                    {item.stats.language && <span className="text-[#657786] text-xs">#{item.stats.language}</span>}
+                    {item.stats.language && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTag(item.stats.language.toLowerCase())}
+                        aria-label={`Filter by language #${item.stats.language}`}
+                        className="text-[#657786] hover:text-[#0084B4] text-xs hover:underline cursor-pointer"
+                      >
+                        #{item.stats.language}
+                      </button>
+                    )}
                   </div>
 
                   <p className="mt-1 text-sm whitespace-pre-wrap break-words">
                     {captionParts(item.caption).map((p, i) =>
                       p.tag ? (
-                        <span key={i} className="text-[#0084B4]">
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setSelectedTag(p.text.replace(/^#/, "").toLowerCase())}
+                          aria-label={`Filter by tag ${p.text}`}
+                          className="text-[#0084B4] hover:underline cursor-pointer font-medium"
+                        >
                           {p.text}
-                        </span>
+                        </button>
                       ) : (
                         <React.Fragment key={i}>{p.text}</React.Fragment>
                       ),

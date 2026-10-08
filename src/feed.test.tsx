@@ -171,4 +171,31 @@ describe("reading the feed", () => {
     const items = await within(feed).findAllByRole("listitem");
     await waitFor(() => expect(within(items[0]).getByText("@linked")).toBeInTheDocument());
   });
+
+  it("filters posts when clicking a hashtag and clears the filter", async () => {
+    feedDocs = [
+      post("p1", { author: "@ada", caption: "Added #rust lifetime check", tags: ["rust"], stats: { additions: 1, deletions: 0, similarity: 100, language: "rust" } }),
+      post("p2", { author: "@grace", caption: "Refactored #python parser", tags: ["python"], stats: { additions: 2, deletions: 1, similarity: 80, language: "python" } }),
+    ];
+    renderStudio();
+    fireEvent.click(await screen.findByRole("button", { name: /^feed$/i }));
+
+    const feed = await screen.findByRole("dialog", { name: /the feed/i });
+    expect(await within(feed).findByText("@ada")).toBeInTheDocument();
+    expect(within(feed).getByText("@grace")).toBeInTheDocument();
+
+    // Click #rust hashtag
+    fireEvent.click(within(feed).getByRole("button", { name: "Filter by tag #rust" }));
+
+    // Now only @ada's post should be visible
+    expect(within(feed).getByText("@ada")).toBeInTheDocument();
+    expect(within(feed).queryByText("@grace")).not.toBeInTheDocument();
+    expect(within(feed).getByText(/Filter:/)).toBeInTheDocument();
+    expect(within(feed).getByText("(1 post)")).toBeInTheDocument();
+
+    // Click Clear
+    fireEvent.click(within(feed).getByRole("button", { name: "Clear tag filter" }));
+    expect(within(feed).getByText("@ada")).toBeInTheDocument();
+    expect(within(feed).getByText("@grace")).toBeInTheDocument();
+  });
 });
