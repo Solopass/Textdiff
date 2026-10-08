@@ -3,12 +3,13 @@ import { Check, Copy, Flame, KeyRound, Link2, Lock, Share2, X } from "lucide-rea
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { SHARE_TTL_DAYS } from "../lib/constants";
 
-export type ShareProtection = "link-key" | "passphrase" | "none";
+export type ShareProtection = "link-key" | "passphrase" | "recipient" | "none";
 
 export interface ShareOptions {
   note: string;
   protection: ShareProtection;
   passphrase: string;
+  recipientPublicKey?: string;
   burnAfterReading: boolean;
 }
 
@@ -21,7 +22,7 @@ interface Props {
   onRequestPro: () => void;
 }
 
-const PROTECTIONS: { id: ShareProtection; label: string; hint: string; icon: React.ReactNode }[] = [
+const PROTECTIONS: { id: ShareProtection; label: string; hint: string; icon: React.ReactNode; isProOnly?: boolean }[] = [
   {
     id: "link-key",
     label: "ENCRYPTED LINK",
@@ -33,6 +34,13 @@ const PROTECTIONS: { id: ShareProtection; label: string; hint: string; icon: Rea
     label: "PASSWORD",
     hint: "Encrypted with a key derived from a password. Send the password separately — the link alone opens nothing.",
     icon: <KeyRound className="w-3.5 h-3.5" />,
+  },
+  {
+    id: "recipient",
+    label: "RECIPIENT PUBLIC KEY",
+    hint: "Encrypt specifically for your collaborator's public key (tdspub1:... or ssh-rsa). Only their private key can decrypt it.",
+    icon: <Lock className="w-3.5 h-3.5 text-[#F59E0B]" />,
+    isProOnly: true,
   },
   {
     id: "none",
@@ -50,6 +58,8 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
   const [protection, setProtection] = useState<ShareProtection>("link-key");
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [recipientKey, setRecipientKey] = useState("");
+  const [keyCopied, setKeyCopied] = useState(false);
   const [burn, setBurn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -62,6 +72,8 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
       setNote("");
       setPassphrase("");
       setConfirm("");
+      setRecipientKey("");
+      setKeyCopied(false);
       setBurn(false);
       setError("");
       setUrl("");
@@ -73,7 +85,11 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
 
   const mismatch = protection === "passphrase" && confirm !== "" && passphrase !== confirm;
   const canSubmit =
-    !busy && (protection !== "passphrase" || (passphrase.length > 0 && passphrase === confirm));
+    !busy &&
+    (protection === "link-key" ||
+      protection === "none" ||
+      (protection === "passphrase" && passphrase.length > 0 && passphrase === confirm) ||
+      (protection === "recipient" && isPro && recipientKey.trim().length > 0));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +97,13 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
     setBusy(true);
     setError("");
     try {
-      const link = await onCreate({ note, protection, passphrase, burnAfterReading: burn && isPro });
+      const link = await onCreate({
+        note,
+        protection,
+        passphrase,
+        recipientPublicKey: recipientKey.trim(),
+        burnAfterReading: burn && isPro,
+      });
       setUrl(link);
       try {
         await navigator.clipboard.writeText(link);
@@ -150,6 +172,7 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
             </div>
             <p className="text-[#94A3B8] leading-relaxed">
               {protection === "passphrase" && "Send the password through a different channel than the link. "}
+              {protection === "recipient" && "Only the holder of the matching private key can decrypt this comparison. "}
               {burn && isPro
                 ? "This link self-destructs the first time it is opened. "
                 : `It expires in ${SHARE_TTL_DAYS} days. `}
@@ -184,18 +207,67 @@ export const ShareModal: React.FC<Props> = ({ isOpen, onClose, onCreate, isPro, 
                     name="share-protection"
                     value={p.id}
                     checked={protection === p.id}
-                    onChange={() => setProtection(p.id)}
+                    onChange={() => {
+                      if (p.isProOnly && !isPro) {
+                        onRequestPro();
+                        return;
+                      }
+                      setProtection(p.id);
+                    }}
                     className="mt-0.5"
                   />
                   <span className="flex flex-col gap-1">
                     <span className="text-white flex items-center gap-1.5">
                       {p.icon} {p.label}
+                      {p.isProOnly && !isPro && (
+                        <span className="ml-1 px-1.5 py-0.5 text-[9px] bg-[#F59E0B] text-black font-bold flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" /> PRO
+                        </span>
+                      )}
                     </span>
                     <span className="text-[#64748B] leading-snug">{p.hint}</span>
                   </span>
                 </label>
               ))}
             </fieldset>
+
+            {protection === "recipient" && (
+              <div className="flex flex-col gap-2 p-3 bg-[#0F172A] border border-[#334155]">
+                <label className="flex flex-col gap-1 text-[#94A3B8]">
+                  RECIPIENT PUBLIC KEY
+                  <textarea
+                    rows={3}
+                    value={recipientKey}
+                    onChange={(e) => setRecipientKey(e.target.value)}
+                    placeholder="Paste tdspub1:... or ssh-rsa AAAA..."
+                    aria-label="Recipient public key"
+                    className="bg-black border border-[#334155] text-[#E2E8F0] p-2 font-mono text-xs resize-none"
+                  />
+                </label>
+                <div className="flex justify-between items-center text-[10px] text-[#64748B]">
+                  <span>Recipient needs their matching private key to open.</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const { generateAsymmetricKeyPair } = await import("../lib/crypto/asymmetric");
+                        const pair = await generateAsymmetricKeyPair();
+                        localStorage.setItem("tds_priv_key", pair.privateKey);
+                        localStorage.setItem("tds_pub_key", pair.publicKey);
+                        await navigator.clipboard.writeText(pair.publicKey);
+                        setKeyCopied(true);
+                        setTimeout(() => setKeyCopied(false), 2000);
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    className="text-[#F59E0B] hover:underline cursor-pointer"
+                  >
+                    {keyCopied ? "✓ Public key copied!" : "Generate My Keypair"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {protection === "passphrase" && (
               <div className="flex flex-col gap-2">

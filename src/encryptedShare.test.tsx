@@ -154,4 +154,33 @@ describe("creating encrypted shares", () => {
     fireEvent.click(within(dialog).getByRole("checkbox"));
     expect(await screen.findByRole("dialog", { name: /pro encryption/i })).toBeInTheDocument();
   });
+
+  it("keeps recipient public key encryption locked without a Pro licence", async () => {
+    const dialog = await openShareDialog();
+    const recipientRadio = within(dialog).getByRole("radio", { name: /recipient public key/i });
+    fireEvent.click(recipientRadio);
+    expect(await screen.findByRole("dialog", { name: /pro encryption/i })).toBeInTheDocument();
+  });
+
+  it("decrypts an asymmetric recipient share when private key is provided", async () => {
+    const { generateAsymmetricKeyPair, encryptForRecipient } = await import("./lib/crypto/asymmetric");
+    const pair = await generateAsymmetricKeyPair();
+    const sealed = await encryptForRecipient(SHARED, pair.publicKey);
+
+    mockDoc = {
+      exists: true,
+      data: { data: "tdsasy1:" + JSON.stringify(sealed), timestamp: Date.now() },
+    };
+    setUrl("?id=asymm");
+    render(<App />);
+
+    const input = await screen.findByLabelText("PRIVATE KEY");
+    await userEvent.type(input, pair.privateKey);
+    fireEvent.click(screen.getByRole("button", { name: "UNLOCK" }));
+
+    await waitFor(() => {
+      expect(editors()[0].value).toBe("secret A");
+      expect(editors()[1].value).toBe("secret B");
+    });
+  });
 });

@@ -13,11 +13,11 @@ interface Props {
 
 // Keep the "(soon)" markers honest: drop one only when the feature ships.
 const TIERS: [string, string, string][] = [
-  ["Cipher", "AES-256-GCM, PBKDF2 100k", "+ ECDH / RSA-OAEP envelopes (soon)"],
-  ["Key exchange", "Link key or shared password", "+ Recipient public keys (soon)"],
+  ["Cipher", "AES-256-GCM, PBKDF2 100k", "+ RSA-OAEP / AES-256-GCM"],
+  ["Key exchange", "Link key or shared password", "+ Recipient public keys"],
   ["Lifetime", "30-day expiry", "+ Burn after reading"],
   ["Hardware keys", "—", "WebAuthn / passkey binding (soon)"],
-  ["Archives", "Plain exports", "Encrypted .tds.enc bundles (soon)"],
+  ["Archives", "Plain exports", "Encrypted .tds.enc bundles"],
 ];
 
 const PURCHASE_MAIL =

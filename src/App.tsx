@@ -526,6 +526,8 @@ export default function App() {
   const [proLicense, setProLicense] = useState<LicensePayload | null>(null);
   const [showProModal, setShowProModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showArchiveExportModal, setShowArchiveExportModal] = useState(false);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
 
   // Public diff feed. `?post=<id>` permalinks open the drawer on that post.
   const [showFeed, setShowFeed] = useState(false);
@@ -552,11 +554,14 @@ export default function App() {
 
   const shareLoadStarted = useRef(false);
 
-  /** A passphrase-protected share waiting for its password. */
+  /** An encrypted share or archive waiting for its password / private key. */
   const [pendingUnlock, setPendingUnlock] = useState<{
-    envelope: EncryptedEnvelope;
-    docId: string;
-    burn: boolean;
+    type: "passphrase" | "asymmetric" | "archive";
+    envelope?: EncryptedEnvelope;
+    asymEnvelope?: any;
+    archiveContent?: string;
+    docId?: string;
+    burn?: boolean;
   } | null>(null);
 
   const applySharedData = (data: any) => {
@@ -589,14 +594,37 @@ export default function App() {
     }
   };
 
-  const unlockShare = async (passphrase: string) => {
+  const unlockShare = async (secret: string) => {
     if (!pendingUnlock) return;
+    if (pendingUnlock.type === "archive") {
+      const { readArchive } = await import("./lib/crypto/archive");
+      const data = await readArchive(pendingUnlock.archiveContent!, secret);
+      setOrigText(data.origText);
+      setModText(data.modText);
+      if (data.origFileName) setFileNameA(data.origFileName);
+      if (data.modFileName) setFileNameB(data.modFileName);
+      if (data.language) setLanguage(data.language);
+      setPendingUnlock(null);
+      playSound("success");
+      return;
+    }
+    if (pendingUnlock.type === "asymmetric") {
+      const { decryptWithPrivateKey } = await import("./lib/crypto/asymmetric");
+      const plaintext = await decryptWithPrivateKey(pendingUnlock.asymEnvelope, secret);
+      applySharedData(JSON.parse(plaintext));
+      const { docId, burn } = pendingUnlock;
+      setPendingUnlock(null);
+      if (burn && docId) await burnShare(docId);
+      playSound("success");
+      return;
+    }
     const { decryptEnvelope } = await loadCrypto();
-    const plaintext = await decryptEnvelope(pendingUnlock.envelope, { passphrase });
+    const plaintext = await decryptEnvelope(pendingUnlock.envelope!, { passphrase: secret });
     applySharedData(JSON.parse(plaintext));
     const { docId, burn } = pendingUnlock;
     setPendingUnlock(null);
-    if (burn) await burnShare(docId);
+    if (burn && docId) await burnShare(docId);
+    playSound("success");
   };
 
   useEffect(() => {
@@ -637,11 +665,34 @@ export default function App() {
 
         const burn = raw.burnAfterReading === true;
 
+        if (typeof raw.data === "string" && raw.data.startsWith("tdsasy1:")) {
+          const asymEnvelope = JSON.parse(raw.data.slice("tdsasy1:".length));
+          const savedPrivKey = localStorage.getItem("tds_priv_key");
+          if (savedPrivKey) {
+            try {
+              const { decryptWithPrivateKey } = await import("./lib/crypto/asymmetric");
+              const plaintext = await decryptWithPrivateKey(asymEnvelope, savedPrivKey);
+              applySharedData(JSON.parse(plaintext));
+              if (burn) await burnShare(id);
+              return;
+            } catch {
+              // Saved key didn't match, prompt below
+            }
+          }
+          setPendingUnlock({
+            type: "asymmetric",
+            asymEnvelope,
+            docId: id,
+            burn,
+          });
+          return;
+        }
+
         const shareCrypto = await loadCrypto();
         if (typeof raw.data === "string" && shareCrypto.isEncryptedPayload(raw.data)) {
           const envelope = shareCrypto.parseEnvelope(raw.data);
           if (envelope.mode === "passphrase") {
-            setPendingUnlock({ envelope, docId: id, burn });
+            setPendingUnlock({ type: "passphrase", envelope, docId: id, burn });
             return;
           }
           try {
@@ -987,6 +1038,14 @@ export default function App() {
     setName: (val: string) => void,
   ) => {
     try {
+      if (file.name.toLowerCase().endsWith(".tds.enc")) {
+        const text = await readTextFile(file);
+        setPendingUnlock({
+          type: "archive",
+          archiveContent: text,
+        });
+        return;
+      }
       const text = await readTextFile(file);
       setTarget(text);
       setName(file.name);
@@ -1039,6 +1098,14 @@ export default function App() {
   const [isSharing, setIsSharing] = useState(false);
   const openShare = () => setShowShareModal(true);
 
+  const handleExportArchive = () => {
+    if (!proLicense) {
+      setShowProModal(true);
+      return;
+    }
+    setShowArchiveExportModal(true);
+  };
+
   /**
    * Creates a share and resolves to its URL. Throws user-facing messages; the
    * ShareModal displays them.
@@ -1068,6 +1135,11 @@ export default function App() {
         linkKey = sealed.linkKey;
       } else if (opts.protection === "passphrase") {
         payload = serializeEnvelope(await encryptWithPassphrase(plaintext, opts.passphrase));
+      } else if (opts.protection === "recipient") {
+        if (!opts.recipientPublicKey) throw new Error("A recipient public key is required.");
+        const { encryptForRecipient } = await import("./lib/crypto/asymmetric");
+        const sealed = await encryptForRecipient(plaintext, opts.recipientPublicKey);
+        payload = "tdsasy1:" + JSON.stringify(sealed);
       }
 
       // Mirrors the ceiling in firestore.rules. Checking here turns an opaque
@@ -1752,6 +1824,21 @@ Date: ${new Date().toLocaleString()}
       run: exportRawDiff,
     },
     {
+      id: "export-archive",
+      title: "Export encrypted archive (.tds.enc)",
+      group: "Export",
+      keywords: "archive encrypted bundle tdsenc backup offline save pro",
+      disabled: !diffResult,
+      run: handleExportArchive,
+    },
+    {
+      id: "import-archive",
+      title: "Import encrypted archive (.tds.enc)",
+      group: "Session",
+      keywords: "archive load encrypted bundle decrypt open",
+      run: () => archiveInputRef.current?.click(),
+    },
+    {
       id: "share",
       title: "Create share link",
       group: "Share",
@@ -2408,6 +2495,7 @@ Date: ${new Date().toLocaleString()}
               onExportHtml={exportHtmlReport}
               onExportPdf={exportPdfReport}
               onExportPng={exportImageReport}
+              onExportArchive={handleExportArchive}
               isExporting={isExporting}
               isFullscreen={isFullscreen}
               onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
@@ -2679,14 +2767,83 @@ Date: ${new Date().toLocaleString()}
         <Suspense fallback={<PanelFallback label="unlock dialog" />}>
           <UnlockShareModal
             isOpen
+            title={
+              pendingUnlock.type === "archive"
+                ? "Encrypted Archive (.tds.enc)"
+                : pendingUnlock.type === "asymmetric"
+                  ? "Recipient-Encrypted Share"
+                  : "Password-protected share"
+            }
+            description={
+              pendingUnlock.type === "archive"
+                ? "Enter the password used to encrypt this .tds.enc archive file."
+                : pendingUnlock.type === "asymmetric"
+                  ? "This share is encrypted for a specific recipient public key. Enter your matching private key (tdspriv1:...)."
+                  : "This comparison is encrypted. Enter the password the sender gave you — it is checked here in your browser and never sent anywhere."
+            }
+            label={pendingUnlock.type === "asymmetric" ? "PRIVATE KEY" : "PASSWORD"}
+            placeholder={pendingUnlock.type === "asymmetric" ? "tdspriv1:..." : undefined}
+            isPassword={pendingUnlock.type !== "asymmetric"}
             onClose={() => {
               setPendingUnlock(null);
-              setDiffError("This share is password-protected. Reload the link to try again.");
+              setDiffError(
+                pendingUnlock.type === "archive"
+                  ? "Archive decryption cancelled."
+                  : "This share is protected. Reload the link to try again.",
+              );
             }}
             onUnlock={unlockShare}
           />
         </Suspense>
       )}
+
+      {showArchiveExportModal && (
+        <Suspense fallback={<PanelFallback label="archive export dialog" />}>
+          <UnlockShareModal
+            isOpen
+            title="Export Encrypted Archive (.tds.enc)"
+            description="Enter a password to encrypt this entire diff session into a zero-knowledge .tds.enc file. Stored 100% locally on your machine."
+            label="ENCRYPTION PASSWORD"
+            submitText="EXPORT"
+            isPassword={true}
+            onClose={() => setShowArchiveExportModal(false)}
+            onUnlock={async (password) => {
+              const { createArchive } = await import("./lib/crypto/archive");
+              const { downloadFile } = await import("./lib/diffExport");
+              const json = await createArchive(
+                {
+                  origText,
+                  modText,
+                  origFileName: fileNameA || "original.txt",
+                  modFileName: fileNameB || "modified.txt",
+                  language,
+                },
+                password,
+              );
+              downloadFile(
+                `${(fileNameA || "session").replace(/\.[^/.]+$/, "")}.tds.enc`,
+                json,
+                "application/json",
+              );
+              setShowArchiveExportModal(false);
+              playSound("success");
+            }}
+          />
+        </Suspense>
+      )}
+
+      <input
+        type="file"
+        ref={archiveInputRef}
+        accept=".tds.enc"
+        aria-label="Import archive file input"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) loadFileInto(f, setOrigText, setFileNameA);
+          e.target.value = "";
+        }}
+      />
 
       {showComposer && (
         <Suspense fallback={<PanelFallback label="composer" />}>

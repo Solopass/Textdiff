@@ -3,6 +3,7 @@ import {
   Download,
   FileText,
   FileCode,
+  Lock,
   Maximize,
   Minimize,
 } from "lucide-react";
@@ -25,6 +26,7 @@ interface Props {
   onExportHtml: () => void;
   onExportPdf: () => void;
   onExportPng: () => void;
+  onExportArchive?: () => void;
   isExporting: "png" | "pdf" | null;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -41,6 +43,7 @@ export const StatsBanner: React.FC<Props> = ({
   onExportHtml,
   onExportPdf,
   onExportPng,
+  onExportArchive,
   isExporting,
   isFullscreen,
   onToggleFullscreen,
@@ -126,6 +129,16 @@ export const StatsBanner: React.FC<Props> = ({
             <Download className="w-3.5 h-3.5" />
             EXPORT_JSON
           </button>
+          {onExportArchive && (
+            <button
+              onClick={onExportArchive}
+              className="px-3 py-1.5 border border-[#B45309] bg-[#78350F] text-[#FDE68A] hover:bg-[#B45309] transition-colors text-xs font-mono flex items-center gap-2"
+              title="Export Encrypted Archive (.tds.enc)"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              EXPORT_ENC
+            </button>
+          )}
           <button
             onClick={onExportHtml}
             className="px-3 py-1.5 border border-[#1D4ED8] bg-[#1E3A8A] text-[#93C5FD] hover:bg-[#1D4ED8] transition-colors text-xs font-mono flex items-center gap-2"
