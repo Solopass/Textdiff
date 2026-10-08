@@ -3,15 +3,16 @@
 A working checklist, ordered. Each task says how to know it actually worked —
 that matters more than the steps themselves.
 
-Baseline as of writing: 72 tests passing, typecheck clean, production build
-green, initial load ~132KB gzipped.
+Baseline as of 2026-10-08: 160 tests passing (22 files), typecheck clean,
+GitHub Pages deploy green on `main`.
 
 ---
 
 ## 0. Ship what's already built
 
-Nothing below matters until this is out. The work is committed on the
-`overhaul/v1` branch and not yet pushed.
+**Mostly done.** `overhaul/v1` was merged (PR #1) and everything since lives on
+`main`; every push to `main` deploys to GitHub Pages. Still open here: the
+manual browser pass (0.1) and the share cleanup (0.5).
 
 All commands below are PowerShell, run from the repository root.
 
@@ -54,9 +55,20 @@ Open the preview URL and, with devtools console visible, check:
 If anything fails, the likely culprit is `index.html`. Note the exact console
 message before changing anything.
 
-### 0.2 — Deploy the Firestore rules
+### 0.2 — Deploy the Firestore rules [DONE 2026-10-08]
 
-**Order matters.** The new rules *require* an `expiresAt` field that only the
+Published by pasting `firestore.rules` into the console; the live feed loads
+afterwards. Two things to know for next time:
+
+- The Firebase project (`gen-lang-client-0562403270`) was created by Google AI
+  Studio, so it may not show in the Firebase console's project list — find it
+  in the Google Cloud console.
+- The app uses a **named** database, `ai-studio-textdiffstudio-…` (see
+  `firestoreDatabaseId` in `firebase-applet-config.json`), not `(default)`.
+  There is no `firebase.json` in the repo, so `firebase deploy` won't work as
+  written below until one is added that targets that database.
+
+Original notes: **Order matters.** The new rules *require* an `expiresAt` field that only the
 new client sends. Deploy the rules with or after the app, never before, or
 sharing breaks for everyone on the old build.
 
@@ -68,9 +80,9 @@ Verify: create a share link from the deployed site and open it in a private
 window. If you get `PERMISSION_DENIED`, the rules and the client are out of
 sync — check that the deployed app is the new one.
 
-### 0.3 — Push
+### 0.3 — Push [DONE]
 
-The work is already committed on the `overhaul/v1` branch; `main` is untouched.
+Kept for reference. The work was committed on the `overhaul/v1` branch.
 
 ```powershell
 git status                       # expect a clean tree on overhaul/v1
@@ -236,7 +248,7 @@ Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
 
 ---
 
-## 6. Tiered Client-Side Encryption (The Only Paid Feature) [PARTLY DONE]
+## 6. Tiered Client-Side Encryption (The Only Paid Feature) [MOSTLY DONE]
 
 **Done:**
 - Free tier: `src/lib/crypto/symmetric.ts`. Encrypted link (random key in
@@ -250,22 +262,27 @@ Reduced `App.tsx` by over 1,000 lines (down from 3,755 lines to 2,748 lines):
   is at `~/.textdiff/license-signing-key.jwk` — **back it up somewhere safe**.
   Stores the raw token rather than decoded fields, so it is re-verified each load.
 - Burn after reading (Pro), with a matching `firestore.rules` change.
+- Recipient public-key encryption: `src/lib/crypto/asymmetric.ts`. RSA-OAEP
+  (2048, SHA-256) wraps a per-share AES-256-GCM key; keys are `tdspub1:` /
+  `tdspriv1:` strings with a short SHA-256 fingerprint, and `ssh-rsa` keys
+  (e.g. from GitHub `.keys`) import directly. Keypair generation and the
+  recipient field live in `ShareModal`; `UnlockShareModal` takes the private key.
+- `.tds.enc` archives: `src/lib/crypto/archive.ts`. Passphrase (PBKDF2 100k) →
+  AES-256-GCM envelope like shares, no separate HMAC. Holds both texts, file
+  names, language and a timestamp.
 - Fixed in passing: self-hosted Monaco never actually loaded (see the CSP
   section of `ARCHITECTURE.md`). Editors were stuck on "Loading..." in the
   production build.
 
-**Before deploying:** deploy `firestore.rules` *before* anyone uses burn after
-reading — the old rules reject the extra key. The new rules accept everything
-the old ones did, so rules-first is safe here.
+The rules burn after reading needs are live (deployed 2026-10-08).
 
 **Still to do (marked "(soon)" in the Pro dialog — keep those honest):**
-- Recipient public-key encryption (ECDH P-256 / RSA-OAEP, GitHub `.keys`).
-  Note GitHub keys are SSH keys: `ssh-rsa` converts to RSA-OAEP, but
-  `ssh-ed25519` can't encrypt directly. Recipients also need a keypair UI.
 - WebAuthn PRF hardware binding.
-- `.tds.enc` archives. AES-GCM already authenticates, so the planned
-  HMAC-SHA256 would be redundant — use a GCM envelope like shares.
 - A real purchase flow; "Get a licence" is currently a mailto.
+- Note: `ssh-ed25519` GitHub keys still can't be used as recipients (Ed25519
+  signs, it doesn't encrypt). Only `ssh-rsa` and TextDiff's own `tdspub1:` keys
+  work. Pasting an ed25519 key gives the generic "Unrecognised public key
+  format" error; saying why would save people some confusion.
 
 ### Background & Monetization Philosophy
 TextDiff Studio is client-first, private-by-design, and open source (PolyForm Noncommercial).
@@ -324,7 +341,7 @@ license keys (Ed25519) verified locally via WebCrypto, preserving full offline c
 
 ---
 
-## 7. Public "Diff Feed" (Retro Twitter Micro-Stream) [DONE — needs rules deploy]
+## 7. Public "Diff Feed" (Retro Twitter Micro-Stream) [DONE]
 
 **Done:** `POST TO FEED` / `FEED` toolbar buttons and palette entries,
 `FeedComposerModal` (280-char counter, persisted handle, stats pills, hunk
@@ -342,8 +359,8 @@ in `src/lib/feedApi.ts`; all lazy.
   `timestamp == request.time`, so posts can't be backdated or future-dated to
   stay on top. Optional `fileName` added.
 
-**Before it works live:** `firebase deploy --only firestore:rules`. Until then
-reads fail with "The feed isn't available right now."
+Since then: hashtag and language filters with an active-filter chip in
+`FeedDrawer`. Rules deployed 2026-10-08; the live feed loads.
 
 **Open risk — spam.** It's an unauthenticated public write endpoint. The rules
 bound size and shape; the 30s cooldown is client-side only and trivially
