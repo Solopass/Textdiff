@@ -175,7 +175,7 @@ describe("creating encrypted shares", () => {
     render(<App />);
 
     const input = await screen.findByLabelText("PRIVATE KEY");
-    await userEvent.type(input, pair.privateKey);
+    fireEvent.change(input, { target: { value: pair.privateKey } });
     fireEvent.click(screen.getByRole("button", { name: "UNLOCK" }));
 
     await waitFor(() => {

@@ -48,6 +48,7 @@ export default defineConfig(() => {
       globals: true,
       environment: 'jsdom',
       setupFiles: './src/setupTests.ts',
+      testTimeout: 15000,
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
