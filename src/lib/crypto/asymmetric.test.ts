@@ -75,4 +75,11 @@ describe("Asymmetric Public-Key Encryption (RSA-OAEP + AES-GCM)", () => {
     await expect(importPublicKey("garbage-key")).rejects.toThrow();
     await expect(importPrivateKey("garbage-key")).rejects.toThrow(DecryptionError);
   });
+
+  it("explains why sign-only SSH keys (GitHub's default ed25519) can't be recipients", async () => {
+    const ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@host";
+    await expect(importPublicKey(ed25519)).rejects.toThrow(/ssh-ed25519 keys can only sign/);
+    await expect(importPublicKey("ecdsa-sha2-nistp256 AAAAE2VjZHNh")).rejects.toThrow(/can only sign/);
+    await expect(importPublicKey("sk-ssh-ed25519@openssh.com AAAA")).rejects.toThrow(/can only sign/);
+  });
 });

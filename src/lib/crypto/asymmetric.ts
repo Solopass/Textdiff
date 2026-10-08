@@ -100,6 +100,16 @@ export const importPublicKey = async (rawKey: string): Promise<{ key: CryptoKey;
     }
   }
 
+  // SSH key types that can only sign, never encrypt (GitHub's default is ed25519).
+  // Say why, rather than falling through to the generic error below.
+  const sshType = clean.split(/\s+/, 1)[0];
+  if (/^(ssh-ed25519|ecdsa-sha2-|sk-)/.test(sshType)) {
+    throw new Error(
+      `${sshType} keys can only sign, not encrypt, so they can't be used as a recipient key. ` +
+        "Use an ssh-rsa key, or ask the recipient for their TextDiff public key (tdspub1:...).",
+    );
+  }
+
   // 3. Fallback: try raw base64 SPKI or throw
   try {
     const bytes = fromB64Url(clean);

@@ -281,8 +281,8 @@ The rules burn after reading needs are live (deployed 2026-10-08).
 - A real purchase flow; "Get a licence" is currently a mailto.
 - Note: `ssh-ed25519` GitHub keys still can't be used as recipients (Ed25519
   signs, it doesn't encrypt). Only `ssh-rsa` and TextDiff's own `tdspub1:` keys
-  work. Pasting an ed25519 key gives the generic "Unrecognised public key
-  format" error; saying why would save people some confusion.
+  work. Pasting a sign-only key (ed25519, ecdsa, `sk-` security keys) shows
+  an error that says why and what to use instead.
 
 ### Background & Monetization Philosophy
 TextDiff Studio is client-first, private-by-design, and open source (PolyForm Noncommercial).
